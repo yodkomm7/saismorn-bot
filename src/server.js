@@ -2,6 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const line = require('./lineClient');
 const botHandlers = require('./botHandlers');
+const https = require('https');
 
 dotenv.config();
 
@@ -49,7 +50,7 @@ app.get('/', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>บอทคู่คิดเพื่อนยาก - ช่วยหารค่าอาหารและเฉลี่ยรายจ่ายกลุ่มเพื่อน</title>
+  <title>น้องส้ม - ผู้ช่วยหารค่าอาหาร & สแกนใบเสร็จ</title>
   <meta name="description" content="บอทไลน์ผู้ช่วยจัดการค่าใช้จ่ายกลุ่มเพื่อน ช่วยหารค่าอาหาร บันทึกเลขบัญชี และเฉลี่ยส่วนต่าง rebalancing จากทริปหรือปาร์ตี้อย่างชาญฉลาดและรวดเร็ว">
   <!-- Google Fonts: Outfit and Prompt -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -58,7 +59,7 @@ app.get('/', (req, res) => {
   
   <style>
     :root {
-      --primary: #10B981; /* Emerald green */
+      --primary: #10B981;
       --primary-hover: #059669;
       --bg-dark: #0B0F19;
       --card-bg: rgba(17, 24, 39, 0.7);
@@ -221,7 +222,6 @@ app.get('/', (req, res) => {
       width: 100%;
     }
 
-    /* Animation effects */
     @keyframes fadeIn {
       from {
         opacity: 0;
@@ -238,15 +238,15 @@ app.get('/', (req, res) => {
 
   <header>
     <div class="logo" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 800; color: var(--primary);">
-      ANTIGRAVITY BILL SPLITTER
+      NONG SOM LINE BOT - ONLINE 24/7
     </div>
   </header>
 
   <main class="container">
     <section class="hero-section">
-      <h1 id="main-heading">บอทคู่คิดเพื่อนยาก 🤖</h1>
+      <h1 id="main-heading">น้องส้ม 🍊</h1>
       <p class="subtitle">
-        ช่วยบันทึกเลขบัญชีของทุกคนในกลุ่มเพื่อน และคำนวณเฉลี่ยรายจ่ายตอนไปสังสรรค์ ปาร์ตี้ หรือออกทริปอย่างรวดเร็ว ด้วยระบบเคลียร์ยอดโอนคืนแบบลดจำนวนการทำรายการให้น้อยที่สุด!
+        บอทผู้ช่วยสแกนใบเสร็จ หารค่าอาหาร สรุปส่วนต่าง และเจนเนอเรตรูป PromptPay QR Code อัตโนมัติ!
       </p>
     </section>
 
@@ -255,39 +255,33 @@ app.get('/', (req, res) => {
       <div class="command-list">
         
         <div class="command-item" id="cmd-register">
-          <span class="command-tag">Register Account</span>
-          <span class="command-syntax">บันทึกบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ]</span>
-          <span class="command-desc">บันทึกข้อมูลบัญชีรับเงินของคุณ เช่น <span class="copyable">บันทึกบัญชี กสิกร 123-4-56789-0 สมชาย</span> หรือพร้อมเพย์ <span class="copyable">บันทึก พร้อมเพย์ 0891234567 สมศรี</span></span>
+          <span class="command-tag">Register PromptPay</span>
+          <span class="command-syntax">บันทึก [เบอร์โทร] [ชื่อ]</span>
+          <span class="command-desc">บันทึกข้อมูลพร้อมเพย์ เช่น <span class="copyable">บันทึก 0891234567 สมชาย</span> บอทจะสร้างรูป QR Code ให้อัตโนมัติ</span>
         </div>
 
         <div class="command-item" id="cmd-view">
           <span class="command-tag">View Accounts</span>
           <span class="command-syntax">ดูบัญชี</span>
-          <span class="command-desc">แสดงการ์ดบัญชีธนาคารพร้อมปุ่มกดคัดลอกเลขบัญชีของเพื่อนร่วมกลุ่มทุกคน เพื่อการโอนคืนที่ง่ายดาย</span>
-        </div>
-
-        <div class="command-item" id="cmd-equal">
-          <span class="command-tag">Equal Split</span>
-          <span class="command-syntax">หารเท่ากัน [ยอดรวม] [ชื่ออาหาร]</span>
-          <span class="command-desc">กรณีคนเดียวจ่ายเงินทั้งหมด ให้เพื่อนๆ กดเข้าร่วมหาร และพิมพ์ <span class="copyable">สรุปยอด</span> เพื่อคำนวณส่วนหารที่เท่ากัน</span>
-        </div>
-
-        <div class="command-item" id="cmd-party">
-          <span class="command-tag">Multi-Payer Party</span>
-          <span class="command-syntax">เริ่มเฉลี่ย [ชื่อปาร์ตี้/ทริป]</span>
-          <span class="command-desc">กรณีแต่ละคนช่วยกันออกค่าใช้จ่ายคนละส่วน เช่น ทริปพัทยา พิมพ์เปิดห้องเก็บรายจ่ายปาร์ตี้ และเริ่มทยอยลงชื่อเข้าร่วม</span>
+          <span class="command-desc">แสดงรายการเลขบัญชีและรูป QR Code ของทุกคนในกลุ่ม</span>
         </div>
 
         <div class="command-item" id="cmd-expense">
           <span class="command-tag">Record Expense</span>
-          <span class="command-syntax">จ่าย [ยอดเงิน] [ชื่อรายการ]</span>
-          <span class="command-desc">ใช้ลงรายจ่ายที่ออกไป เช่น <span class="copyable">จ่าย 800 ค่าเค้ก</span> หรือ <span class="copyable">จ่าย 1500 ค่าอาหาร</span> บอทจะบันทึกรวมยอดให้</span>
+          <span class="command-syntax">ค่าขนม 200</span>
+          <span class="command-desc">พิมพ์ลงรายการค่าใช้จ่าย บอทจะบันทึกคนส่งเป็นคนจ่ายและดึงเข้าหารให้อัตโนมัติ</span>
+        </div>
+
+        <div class="command-item" id="cmd-delete">
+          <span class="command-tag">Delete Item</span>
+          <span class="command-syntax">ลบรายการ [ลำดับ]</span>
+          <span class="command-desc">พิมพ์ <span class="copyable">ดูรายการ</span> แล้วสั่งลบรายการที่พิมพ์ผิดด้วย <span class="copyable">ลบรายการ 2</span></span>
         </div>
 
         <div class="command-item" id="cmd-settle">
           <span class="command-tag">Calculate Settlement</span>
           <span class="command-syntax">สรุปยอด</span>
-          <span class="command-desc">คำนวณเฉลี่ยค่าใช้จ่ายทั้งหมดของทุกคน และสรุปยอดที่ต้องจ่ายหรือได้คืน พร้อมเลขบัญชีที่ตรงกับผู้รับโอน</span>
+          <span class="command-desc">คำนวณหักลบเงินล่วงหน้า และสร้างรูป QR Code พร้อมระบุยอดโอนให้อัตโนมัติ</span>
         </div>
 
       </div>
@@ -295,7 +289,7 @@ app.get('/', (req, res) => {
   </main>
 
   <footer class="info-footer">
-    <p>© 2026 Antigravity. Built with precision for premium LINE webhook handlers.</p>
+    <p>© 2026 Nong Som LINE Bot. Built for instant receipt scanning & group expense splitting.</p>
   </footer>
 
 </body>
@@ -308,4 +302,14 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Webhook URL is ready at http://localhost:${PORT}/webhook`);
+
+  // Self-Ping / Keep-Alive Cron (Pings every 10 minutes to prevent Render Free Tier from sleeping)
+  const keepAliveUrl = process.env.KEEP_ALIVE_URL || 'https://saismorn-bot.onrender.com/';
+  setInterval(() => {
+    https.get(keepAliveUrl, (res) => {
+      console.log(`[Keep-Alive] Pinged ${keepAliveUrl} - Status Code: ${res.statusCode}`);
+    }).on('error', (err) => {
+      console.warn(`[Keep-Alive] Ping failed:`, err.message);
+    });
+  }, 10 * 60 * 1000);
 });
