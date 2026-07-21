@@ -46,11 +46,11 @@ async function handleJoinGroup(event) {
 น้องส้มผู้ช่วยหารค่าอาหารประจำกลุ่มรายงานตัวค่ะ!
 
 💡 ฟีเจอร์ที่น้องส้มช่วยได้:
-1. 📸 **สแกนใบเสร็จ/สลิป:** ถ่ายรูปใบเสร็จส่งในกลุ่ม น้องส้มจะบันทึกยอดเงินให้อัตโนมัติ!
-2. 💸 **ลงรายการค่าใช้จ่าย:** พิมพ์ "ค่าอาหาร ร้านหมูจุ่ม 650" หรือ "จ่าย 800 ค่าเค้ก"
+1. 📸 **สแกนใบเสร็จ/สลิป:** ถ่ายรูปใบเสร็จส่งในกลุ่ม น้องส้มจะบันทึกยอดเงินและคนจ่ายให้อัตโนมัติ!
+2. 💸 **ลงรายการค่าใช้จ่าย:** พิมพ์ "ค่าขนม 200" หรือ "จ่าย 800 ค่าเค้ก" (ระบบจะบันทึกคนส่งเป็นคนจ่ายและเข้าหารให้อัตโนมัติ!)
 3. 🪪 **บันทึกเลขบัญชี:** พิมพ์ "บันทึกบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ]"
 4. 📋 **เรียกดูบัญชี:** พิมพ์ "ดูบัญชี" หรือ "ตรวจบัญชี"
-5. 🧮 **คิดเงินเคลียร์ยอด:** พิมพ์ "สรุปยอด" (คิดส่วนต่างใครต้องรับเงินคืน/โอนเพิ่มอัตโนมัติ!)
+5. 🧮 **คิดเงินเคลียร์ยอด:** พิมพ์ "สรุปยอด" (คำนวณส่วนต่างใครรับคืน/โอนเพิ่มให้อัตโนมัติ!)
 
 ยินดีที่ได้รู้จักทุกคนนะคะ! 😊`;
 
@@ -116,17 +116,23 @@ async function handleImageMessage(event) {
     return b;
   });
 
+  const names = updatedBill.participants.map((p, i) => `${i + 1}. ${p.displayName}`).join('\n');
   let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
+  const splitAmount = Math.round((total / updatedBill.participants.length) * 100) / 100;
 
   const replyMsg = `✨ น้องส้มอ่านสลิป/ใบเสร็จเรียบร้อยค่ะ 🧾
 
-🏪 ร้าน/รายการ: ${scanResult.merchantName}
-💵 ยอดเงิน: ${scanResult.totalAmount.toLocaleString('th-TH')} บาท
 👤 ผู้ชำระ: ${profile.displayName}
+🏪 รายการ: ${scanResult.merchantName} (${scanResult.totalAmount.toLocaleString('th-TH')} บาท)
 
-บันทึกยอดลงปาร์ตี้ "${updatedBill.title}" เรียบร้อยค่ะ!
-💵 ยอดรวมสะสมขณะนี้: ${total.toLocaleString('th-TH')} บาท
-👉 สมาชิกพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
+💵 ยอดรวมสะสมมื้อนี้: ${total.toLocaleString('th-TH')} บาท
+
+👥 สมาชิกที่เข้าร่วม (${updatedBill.participants.length} คน):
+${names}
+
+💰 ตกคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
+
+👉 เพื่อนคนอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
 👉 เมื่อลงครบแล้วพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
 
   return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
@@ -314,7 +320,7 @@ ${names}
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 6. RECORD EXPENSE COMMAND (Support "จ่าย 800 ค่าเค้ก" or "ค่าอาหาร ร้านหมูจุ่ม 650" with precise Payer tracking)
+  // 6. RECORD EXPENSE COMMAND (Precise Payer Auto-Join & Payer Assignment)
   const payPrefixRegex = /^(?:จ่าย|ออกค่า)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
   const addPrefixRegex = /^(?:บวก|เพิ่ม|บวกเพิ่ม)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
   const addSuffixRegex = /^(.+)\s+(\d+(?:\.\d+)?)$/i;
@@ -349,6 +355,7 @@ ${names}
     }
 
     const updatedBill = db.updateBill(activeBill.id, (b) => {
+      // Auto-add sender to participants if not present
       if (!b.participants.some(p => p.userId === userId)) {
         b.participants.push({
           userId: userId,
@@ -357,6 +364,7 @@ ${names}
           hasPaid: false
         });
       }
+      // Assign sender as the exact payer of this item
       b.payers.push({
         userId: userId,
         displayName: profile.displayName,
@@ -367,27 +375,28 @@ ${names}
       return b;
     });
 
-    let paymentsText = updatedBill.payers.map(p => `• ${p.displayName} จ่ายค่า${p.itemName}: ${p.amountPaid.toLocaleString('th-TH')} บาท`).join('\n');
+    const names = updatedBill.participants.map((p, i) => `${i + 1}. ${p.displayName}`).join('\n');
     let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
+    const splitAmount = Math.round((total / updatedBill.participants.length) * 100) / 100;
 
-    const replyMsg = `📝 บันทึกรายจ่ายเรียบร้อยค่ะ!
+    const replyMsg = `✨ บันทึกรายจ่ายเพิ่มเติมเรียบร้อยค่ะ! 📝
 
 👤 ผู้ชำระ: ${profile.displayName}
-➕ รายการ: ${payItemName} (${payAmount.toLocaleString('th-TH')} บาท)
+➕ เพิ่มรายการ: ${payItemName} (${payAmount.toLocaleString('th-TH')} บาท)
+💵 ยอดรวมสะสมมื้อนี้: ${total.toLocaleString('th-TH')} บาท
 
-💰 รายการทั้งหมดในบิลนี้:
-${paymentsText}
+👥 สมาชิกที่เข้าร่วม (${updatedBill.participants.length} คน):
+${names}
 
-💵 ยอดรวมสะสมขณะนี้: ${total.toLocaleString('th-TH')} บาท
+💰 ตกคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
 
 👉 เพื่อนคนอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
-👉 เพิ่มรายการอื่นพิมพ์ "ค่าใช้จ่าย ราคา" หรือส่งรูปสลิปเข้ามาได้ค่ะ
-👉 เมื่อลงครบแล้วพิมพ์ "สรุปยอด" ได้เลยนะคะ 😊`;
+👉 เมื่อลงรายการครบแล้วพิมพ์ "สรุปยอด" ได้เลยนะคะ 😊`;
 
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 7. SETTLE / CALCULATE BILL COMMAND (With Detailed Payer Net Breakdown & Minimization)
+  // 7. SETTLE / CALCULATE BILL COMMAND
   if (/^(สรุปยอด|คำนวณ|คิดเงิน|สรุปบิล)$/i.test(text)) {
     const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
@@ -596,7 +605,7 @@ function sendHelpMessage(replyToken) {
 👉 พิมพ์: ดูบัญชี หรือ ตรวจ บัญชี
 
 3. ลงรายการค่าอาหาร/ค่าใช้จ่าย (จำผู้ชำระเงินทุกคน)
-👉 พิมพ์: "จ่าย 800 ค่าเค้ก" หรือ "ค่าหมูจุ่ม 650"
+👉 พิมพ์: "ค่าขนม 200" หรือ "จ่าย 800 ค่าเค้ก"
 👉 หรือ 📸 ถ่ายรูปสลิป/ใบเสร็จส่งเข้ามาในกลุ่มได้เลยค่ะ!
 
 4. คิดเงินสรุปยอด (คำนวณผู้รับคืน/โอนเพิ่มอัตโนมัติ)
