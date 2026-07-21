@@ -46,11 +46,12 @@ async function handleJoinGroup(event) {
 น้องส้มผู้ช่วยหารค่าอาหารประจำกลุ่มรายงานตัวค่ะ!
 
 💡 ฟีเจอร์ที่น้องส้มช่วยได้:
-1. 📸 **สแกนใบเสร็จ/สลิป:** ถ่ายรูปใบเสร็จส่งในกลุ่ม น้องส้มจะบันทึกยอดเงินและคนจ่ายให้อัตโนมัติ!
-2. 💸 **ลงรายการค่าใช้จ่าย:** พิมพ์ "ค่าขนม 200" หรือ "จ่าย 800 ค่าเค้ก" (ระบบจะบันทึกคนส่งเป็นคนจ่ายและเข้าหารให้อัตโนมัติ!)
-3. 🪪 **บันทึกเลขบัญชี:** พิมพ์ "บันทึกบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ]"
-4. 📋 **เรียกดูบัญชี:** พิมพ์ "ดูบัญชี" หรือ "ตรวจบัญชี"
-5. 🧮 **คิดเงินเคลียร์ยอด:** พิมพ์ "สรุปยอด" (คำนวณส่วนต่างใครรับคืน/โอนเพิ่มให้อัตโนมัติ!)
+1. 📸 **สแกนใบเสร็จ/สลิป:** ถ่ายรูปใบเสร็จส่งในกลุ่ม น้องส้มจะบันทึกยอดเงินให้อัตโนมัติ!
+2. 💸 **ลงรายการค่าใช้จ่าย:** พิมพ์ "ค่าขนม 200" หรือ "จ่าย 800 ค่าเค้ก"
+3. ❌ **ลบรายการที่พิมพ์ผิด:** พิมพ์ "ดูรายการ" แล้วสั่ง "ลบรายการ 2"
+4. 🪪 **บันทึกเลขบัญชี:** พิมพ์ "บันทึกบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ]"
+5. 📋 **เรียกดูบัญชี:** พิมพ์ "ดูบัญชี" หรือ "ตรวจบัญชี"
+6. 🧮 **คิดเงินเคลียร์ยอด:** พิมพ์ "สรุปยอด"
 
 ยินดีที่ได้รู้จักทุกคนนะคะ! 😊`;
 
@@ -132,7 +133,8 @@ ${names}
 
 💰 ตกคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
 
-👉 เพื่อนคนอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
+👉 พิมพ์ "ดูรายการ" เพื่อดูสเปกรายการทั้งหมด
+👉 สมาชิกพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
 👉 เมื่อลงครบแล้วพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
 
   return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
@@ -228,7 +230,72 @@ ${bankLabel}
     return line.replyMessage(replyToken, { type: 'text', text: accountsListText });
   }
 
-  // 4. JOIN BILL COMMAND
+  // 4. VIEW LOGGED EXPENSE ITEMS IN ACTIVE BILL
+  if (/^(ดู\s*รายการ|เช็ค\s*รายการ|รายการ|รายการ\s*ทั้งหมด)$/i.test(text)) {
+    const activeBill = db.getActiveBill(groupId);
+    if (!activeBill || !activeBill.payers || activeBill.payers.length === 0) {
+      return line.replyMessage(replyToken, {
+        type: 'text',
+        text: 'ยังไม่มีรายการค่าใช้จ่ายบันทึกอยู่ในบิลขณะนี้ค่ะ 😊'
+      });
+    }
+
+    let itemListText = `📝 รายการค่าใช้จ่ายทั้งหมดในบิลนี้ (${activeBill.title}):\n\n`;
+    activeBill.payers.forEach((item, index) => {
+      itemListText += `${index + 1}. ${item.itemName} - ${item.amountPaid.toLocaleString('th-TH')} บาท (จ่ายโดย: ${item.displayName})\n`;
+    });
+
+    let total = activeBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
+    itemListText += `\n💵 ยอดรวมสะสมขณะนี้: ${total.toLocaleString('th-TH')} บาท\n\n👉 หากต้องการลบรายการที่ใส่ผิด ให้พิมพ์: "ลบรายการ [ลำดับ]" (เช่น ลบรายการ 2)`;
+
+    return line.replyMessage(replyToken, { type: 'text', text: itemListText });
+  }
+
+  // 5. DELETE / CANCEL SPECIFIC EXPENSE ITEM (e.g. "ลบรายการ 2" or "ยกเลิกรายการ 1")
+  const deleteItemRegex = /^(?:ลบ\s*รายการ|ยกเลิก\s*รายการ|ลบ\s*ยอด)\s+(\d+)$/i;
+  if (deleteItemRegex.test(text)) {
+    const itemIndex = parseInt(text.match(deleteItemRegex)[1]) - 1; // 0-based index
+
+    const activeBill = db.getActiveBill(groupId);
+    if (!activeBill || !activeBill.payers || activeBill.payers.length === 0) {
+      return line.replyMessage(replyToken, {
+        type: 'text',
+        text: 'ยังไม่มีรายการให้ลบค่ะ 😊'
+      });
+    }
+
+    if (itemIndex < 0 || itemIndex >= activeBill.payers.length) {
+      return line.replyMessage(replyToken, {
+        type: 'text',
+        text: `ไม่พบลำดับรายการที่ ${itemIndex + 1} ค่ะ 😊\nพิมพ์ "ดูรายการ" เพื่อเช็คลำดับรายการทั้งหมดก่อนนะคะ!`
+      });
+    }
+
+    let deletedItemName = '';
+    let deletedAmount = 0;
+
+    const updatedBill = db.updateBill(activeBill.id, (b) => {
+      const removed = b.payers.splice(itemIndex, 1)[0];
+      if (removed) {
+        deletedItemName = removed.itemName;
+        deletedAmount = removed.amountPaid;
+      }
+      return b;
+    });
+
+    let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
+
+    const replyMsg = `❌ ลบรายการที่ ${itemIndex + 1} (${deletedItemName} ${deletedAmount.toLocaleString('th-TH')} บาท) เรียบร้อยค่ะ!
+
+💵 ยอดรวมสะสมอัปเดตเป็น: ${total.toLocaleString('th-TH')} บาท
+
+👉 พิมพ์ "ดูรายการ" เพื่อเช็ครายการทั้งหมด
+👉 พิมพ์ "สรุปยอด" เมื่อลงครบเรียบร้อยนะคะ 😊`;
+
+    return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
+  }
+
+  // 6. JOIN BILL COMMAND
   if (/^(เข้าร่วม|ร่วมหาร|ร่วมปาร์ตี้)$/i.test(text)) {
     const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
@@ -283,7 +350,7 @@ ${names}
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 5. START MULTI-PAYER PARTY COMMAND
+  // 7. START MULTI-PAYER PARTY COMMAND
   const multiRegex = /^(?:เริ่ม\s*เฉลี่ย|เริ่ม\s*ปาร์ตี้|สร้าง\s*ปาร์ตี้)\s*(.+)?$/i;
   if (multiRegex.test(text)) {
     const match = text.match(multiRegex);
@@ -320,7 +387,7 @@ ${names}
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 6. RECORD EXPENSE COMMAND (Precise Payer Auto-Join & Payer Assignment)
+  // 8. RECORD EXPENSE COMMAND
   const payPrefixRegex = /^(?:จ่าย|ออกค่า)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
   const addPrefixRegex = /^(?:บวก|เพิ่ม|บวกเพิ่ม)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
   const addSuffixRegex = /^(.+)\s+(\d+(?:\.\d+)?)$/i;
@@ -355,7 +422,6 @@ ${names}
     }
 
     const updatedBill = db.updateBill(activeBill.id, (b) => {
-      // Auto-add sender to participants if not present
       if (!b.participants.some(p => p.userId === userId)) {
         b.participants.push({
           userId: userId,
@@ -364,7 +430,6 @@ ${names}
           hasPaid: false
         });
       }
-      // Assign sender as the exact payer of this item
       b.payers.push({
         userId: userId,
         displayName: profile.displayName,
@@ -390,13 +455,13 @@ ${names}
 
 💰 ตกคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
 
-👉 เพื่อนคนอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
+👉 หากใส่ผิดพิมพ์ "ลบรายการ [ลำดับ]" เพื่อยกเลิกได้ค่ะ
 👉 เมื่อลงรายการครบแล้วพิมพ์ "สรุปยอด" ได้เลยนะคะ 😊`;
 
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 7. SETTLE / CALCULATE BILL COMMAND
+  // 9. SETTLE / CALCULATE BILL COMMAND
   if (/^(สรุปยอด|คำนวณ|คิดเงิน|สรุปบิล)$/i.test(text)) {
     const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
@@ -460,7 +525,7 @@ ${names}
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 8. CLOSE BILL / CANCEL BILL
+  // 10. CLOSE BILL / CANCEL BILL
   if (/^(ปิดบิล|เคลียร์แล้ว)$/i.test(text)) {
     const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
@@ -604,11 +669,13 @@ function sendHelpMessage(replyToken) {
 2. เรียกดูบัญชีสมาชิกในกลุ่ม
 👉 พิมพ์: ดูบัญชี หรือ ตรวจ บัญชี
 
-3. ลงรายการค่าอาหาร/ค่าใช้จ่าย (จำผู้ชำระเงินทุกคน)
+3. ลงรายการค่าอาหาร/ค่าใช้จ่าย
 👉 พิมพ์: "ค่าขนม 200" หรือ "จ่าย 800 ค่าเค้ก"
-👉 หรือ 📸 ถ่ายรูปสลิป/ใบเสร็จส่งเข้ามาในกลุ่มได้เลยค่ะ!
 
-4. คิดเงินสรุปยอด (คำนวณผู้รับคืน/โอนเพิ่มอัตโนมัติ)
+4. ดูและลบรายการที่พิมพ์ผิด
+👉 พิมพ์: "ดูรายการ" หรือ "ลบรายการ 2"
+
+5. คิดเงินสรุปยอด (คำนวณผู้รับคืน/โอนเพิ่มอัตโนมัติ)
 👉 พิมพ์: สรุปยอด`;
 
   return line.replyMessage(replyToken, {
