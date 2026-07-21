@@ -22,7 +22,9 @@ function getBankLabel(bankName = '') {
  * Main Webhook Event Router
  */
 async function handleEvent(event) {
-  if (event.type === 'message') {
+  if (event.type === 'join') {
+    return handleJoinGroup(event);
+  } else if (event.type === 'message') {
     if (event.message.type === 'text') {
       return handleTextMessage(event);
     } else if (event.message.type === 'image') {
@@ -32,6 +34,30 @@ async function handleEvent(event) {
     return handlePostback(event);
   }
   return null;
+}
+
+/**
+ * Handle Bot Joining Group Chat
+ */
+async function handleJoinGroup(event) {
+  const replyToken = event.replyToken;
+  const greetingMsg = `สวัสดีค่ะทุกคน! 🍊✨
+
+น้องส้มผู้ช่วยหารค่าอาหารประจำกลุ่มรายงานตัวค่ะ!
+
+💡 ฟีเจอร์ที่น้องส้มช่วยได้:
+1. 📸 **สแกนใบเสร็จ/สลิป:** ถ่ายรูปใบเสร็จส่งในกลุ่ม น้องส้มจะอ่านยอดเงินและเปิดหารให้อัตโนมัติ!
+2. 💸 **หารค่าอาหาร:** พิมพ์ "หารเท่ากัน 1200 ค่าชาบู" หรือ "ค่าหมูจุ่ม 650"
+3. 🪪 **บันทึกเลขบัญชี:** พิมพ์ "บันทึกบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ]"
+4. 📋 **เรียกดูบัญชี:** พิมพ์ "ดูบัญชี" หรือ "ตรวจบัญชี"
+5. 💰 **คิดเงินเคลียร์ยอด:** พิมพ์ "สรุปยอด"
+
+ยินดีที่ได้รู้จักทุกคนนะคะ! 😊`;
+
+  return line.replyMessage(replyToken, {
+    type: 'text',
+    text: greetingMsg
+  });
 }
 
 /**
@@ -159,7 +185,7 @@ ${names}
 }
 
 /**
- * Handle incoming text commands - Persona: น้องส้ม (รองรับเว้นวรรค และเปิดบิลให้อัตโนมัติ)
+ * Handle incoming text commands - Persona: น้องส้ม
  */
 async function handleTextMessage(event) {
   let text = event.message.text.trim();
@@ -175,7 +201,7 @@ async function handleTextMessage(event) {
     return sendHelpMessage(replyToken);
   }
 
-  // 2. REGISTER BANK ACCOUNT COMMAND (Support flexible spaces e.g. "บันทึก บัญชี")
+  // 2. REGISTER BANK ACCOUNT COMMAND
   if (/^(บันทึก|บันทึก\s*บัญชี|บันทึก\s*เลขบัญชี)/i.test(text)) {
     const registerRegex = /^(?:บันทึก|บันทึก\s*บัญชี|บันทึก\s*เลขบัญชี)\s+(.+)$/i;
     
@@ -226,7 +252,7 @@ ${bankLabel}
     });
   }
 
-  // 3. VIEW BANK ACCOUNTS COMMAND (Support space like "ตรวจ บัญชี", "ดู บัญชี", "เช็ค บัญชี")
+  // 3. VIEW BANK ACCOUNTS COMMAND
   if (/^(ดู\s*บัญชี|ดู\s*เลขบัญชี|ตรวจ\s*บัญชี|เช็ค\s*บัญชี|\/accounts)$/i.test(text)) {
     const allUsers = db.getAllUsers();
     const registeredUsers = allUsers.filter(u => u.bankName && u.accountNumber);
@@ -460,7 +486,7 @@ ${paymentsText}
     }
   }
 
-  // 8. SMART FLEXIBLE EXPENSE / ITEM PARSER (e.g. "ค่าอาหาร ร้านหมูจุ่ม 650", "ค่าหมูจุ่ม 500", "เพิ่ม 650")
+  // 8. SMART FLEXIBLE EXPENSE / ITEM PARSER
   const addPrefixRegex = /^(?:บวก|เพิ่ม|บวกเพิ่ม)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
   const addSuffixRegex = /^(.+)\s+(\d+(?:\.\d+)?)$/i;
 
@@ -487,7 +513,6 @@ ${paymentsText}
     const activeBill = db.getActiveBill(groupId);
 
     if (activeBill && activeBill.status === 'collecting') {
-      // Active bill exists -> Accumulate amount
       if (activeBill.type === 'equal') {
         const updatedBill = db.updateBill(activeBill.id, (b) => {
           b.totalAmount = (b.totalAmount || 0) + addAmount;
@@ -547,7 +572,6 @@ ${names}
         return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
       }
     } else {
-      // No active bill exists -> Smart Auto-Create new equal split bill!
       const bill = db.createBill(groupId, userId, addItemName, 'equal');
       const updatedBill = db.updateBill(bill.id, (b) => {
         b.totalAmount = addAmount;

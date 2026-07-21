@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const cloudDb = require('./cloudDb');
 
 const DB_PATH = path.join(__dirname, '..', 'db.json');
 
@@ -28,15 +29,35 @@ function readDb() {
   }
 }
 
-// Write database
+// Write database & sync to Permanent Cloud DB
 function writeDb(data) {
   try {
     fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), 'utf-8');
+    // Asynchronously save to Cloud DB for 24/7 permanent persistence
+    cloudDb.saveToCloud(data).catch(err => console.warn('Cloud sync background note:', err.message));
   } catch (error) {
     console.error('Error writing to database:', error);
     throw error;
   }
 }
+
+// Sync from Cloud DB on boot
+(async function syncCloudOnBoot() {
+  try {
+    const cloudData = await cloudDb.fetchFromCloud();
+    if (cloudData && (cloudData.users || cloudData.bills)) {
+      const localData = readDb();
+      const mergedData = {
+        users: { ...cloudData.users, ...localData.users },
+        bills: { ...cloudData.bills, ...localData.bills }
+      };
+      fs.writeFileSync(DB_PATH, JSON.stringify(mergedData, null, 2), 'utf-8');
+      console.log('Successfully synced and restored database from Permanent Cloud Store!');
+    }
+  } catch (err) {
+    console.warn('Startup cloud sync note:', err.message);
+  }
+})();
 
 const database = {
   // --- User Operations ---
@@ -115,7 +136,6 @@ const database = {
       return null;
     }
     
-    // Pass a copy of the bill to the update function to prevent mutations if it fails
     const billCopy = JSON.parse(JSON.stringify(db.bills[billId]));
     try {
       const updatedBill = updateFn(billCopy);
