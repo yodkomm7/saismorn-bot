@@ -19,6 +19,20 @@ function getBankLabel(bankName = '') {
 }
 
 /**
+ * Helper to generate PromptPay QR Code URL
+ */
+function getPromptPayQrUrl(accountNumber = '', amount = 0) {
+  const cleanNumber = accountNumber.replace(/[^0-9]/g, '');
+  if (cleanNumber.length === 10 || cleanNumber.length === 13) {
+    if (amount > 0) {
+      return `https://promptpay.io/${cleanNumber}/${amount}.png`;
+    }
+    return `https://promptpay.io/${cleanNumber}.png`;
+  }
+  return null;
+}
+
+/**
  * Main Webhook Event Router
  */
 async function handleEvent(event) {
@@ -47,11 +61,10 @@ async function handleJoinGroup(event) {
 
 💡 ฟีเจอร์ที่น้องส้มช่วยได้:
 1. 📸 **สแกนใบเสร็จ/สลิป:** ถ่ายรูปใบเสร็จส่งในกลุ่ม น้องส้มจะบันทึกยอดเงินให้อัตโนมัติ!
-2. 💸 **ลงรายการค่าใช้จ่าย:** พิมพ์ "ค่าขนม 200" หรือ "จ่าย 800 ค่าเค้ก"
-3. ❌ **ลบรายการที่พิมพ์ผิด:** พิมพ์ "ดูรายการ" แล้วสั่ง "ลบรายการ 2"
-4. 🪪 **บันทึกเลขบัญชี:** พิมพ์ "บันทึกบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ]"
-5. 📋 **เรียกดูบัญชี:** พิมพ์ "ดูบัญชี" หรือ "ตรวจบัญชี"
-6. 🧮 **คิดเงินเคลียร์ยอด:** พิมพ์ "สรุปยอด"
+2. 🪪 **บันทึก PromptPay QR:** พิมพ์ "บันทึกบัญชี 0891234567 สมชาย" (บอทสร้างรูป QR โอนเงินให้อัตโนมัติ!)
+3. 💸 **ลงรายการค่าใช้จ่าย:** พิมพ์ "ค่าขนม 200" หรือ "จ่าย 800 ค่าเค้ก"
+4. ❌ **ลบรายการที่พิมพ์ผิด:** พิมพ์ "ดูรายการ" แล้วสั่ง "ลบรายการ 2"
+5. 🧮 **คิดเงินสรุปยอด:** พิมพ์ "สรุปยอด" (สร้างรูป QR พร้อมระบุยอดโอนให้อัตโนมัติ!)
 
 ยินดีที่ได้รู้จักทุกคนนะคะ! 😊`;
 
@@ -157,7 +170,7 @@ async function handleTextMessage(event) {
     return sendHelpMessage(replyToken);
   }
 
-  // 2. REGISTER BANK ACCOUNT COMMAND
+  // 2. REGISTER BANK ACCOUNT / PROMPTPAY COMMAND
   if (/^(บันทึก|บันทึก\s*บัญชี|บันทึก\s*เลขบัญชี)/i.test(text)) {
     const registerRegex = /^(?:บันทึก|บันทึก\s*บัญชี|บันทึก\s*เลขบัญชี)\s+(.+)$/i;
     
@@ -165,10 +178,19 @@ async function handleTextMessage(event) {
       const content = text.match(registerRegex)[1].trim();
       const parts = content.split(/\s+/);
 
-      if (parts.length >= 3) {
-        const bankName = parts[0];
-        const accountNumber = parts[1];
-        const accountName = parts.slice(2).join(' ');
+      if (parts.length >= 2) {
+        let bankName = 'พร้อมเพย์';
+        let accountNumber = '';
+        let accountName = '';
+
+        if (parts.length >= 3) {
+          bankName = parts[0];
+          accountNumber = parts[1];
+          accountName = parts.slice(2).join(' ');
+        } else {
+          accountNumber = parts[0];
+          accountName = parts[1];
+        }
 
         const profile = await line.getUserProfile(userId, groupId);
         const user = db.saveUser(userId, {
@@ -180,35 +202,38 @@ async function handleTextMessage(event) {
         });
 
         const bankLabel = getBankLabel(user.bankName);
-        const replyMsg = `✨ บันทึกข้อมูลบัญชีเรียบร้อยค่ะ!
+        const qrUrl = getPromptPayQrUrl(user.accountNumber);
+
+        let replyMsgText = `✨ บันทึกข้อมูลบัญชีเรียบร้อยค่ะ!
 
 ${bankLabel}
-🔢 เลขบัญชี: ${user.accountNumber}
-👤 ชื่อบัญชี: ${user.accountName}
+🔢 เลข/เบอร์: ${user.accountNumber}
+👤 ชื่อบัญชี: ${user.accountName}`;
 
-น้องส้มบันทึกข้อมูลเรียบร้อยค่ะ สมาชิกสามารถพิมพ์ "ดูบัญชี" เพื่อเรียกดูได้ตลอดเวลานะคะ 😊`;
+        if (qrUrl) {
+          replyMsgText += `\n\n📸 น้องส้มสร้างรูป QR Code สำหรับสแกนจ่ายให้อัตโนมัติแล้วค่ะ! 👇`;
+          
+          return line.replyMessage(replyToken, [
+            { type: 'text', text: replyMsgText },
+            {
+              type: 'image',
+              originalContentUrl: qrUrl,
+              previewImageUrl: qrUrl
+            }
+          ]);
+        }
 
-        return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
-      } else if (parts.length === 1) {
-        return line.replyMessage(replyToken, {
-          type: 'text',
-          text: `🏦 รับทราบธนาคาร "${parts[0]}" ค่ะ 😊\n\nรบกวนระบุเลขบัญชีและชื่อเจ้าของบัญชีเพิ่มเติมนะคะ\n\n👉 ตัวอย่าง: บันทึกบัญชี ${parts[0]} 123-4-56789-0 สมชาย`
-        });
-      } else if (parts.length === 2) {
-        return line.replyMessage(replyToken, {
-          type: 'text',
-          text: `📌 ได้รับเลขบัญชี ${parts[1]} ธนาคาร ${parts[0]} แล้วค่ะ 😊\n\nรบกวนระบุชื่อเจ้าของบัญชีต่อท้ายอีกนิดนะคะ\n\n👉 ตัวอย่าง: บันทึกบัญชี ${parts[0]} ${parts[1]} สมชาย`
-        });
+        return line.replyMessage(replyToken, { type: 'text', text: replyMsgText });
       }
     }
 
     return line.replyMessage(replyToken, {
       type: 'text',
-      text: '📌 รบกวนระบุข้อมูลบัญชีให้ครบถ้วนนะคะ 😊\n\nรูปแบบ: บันทึกบัญชี [ชื่อธนาคาร] [เลขบัญชี] [ชื่อเจ้าของบัญชี]\n\nตัวอย่าง:\nบันทึกบัญชี กรุงเทพ 123-4-56789-0 สมชาย'
+      text: '📌 รบกวนระบุข้อมูลบัญชีให้ครบถ้วนนะคะ 😊\n\nรูปแบบ: บันทึกบัญชี [ธนาคาร/พร้อมเพย์] [เลขบัญชี/เบอร์โทร] [ชื่อเจ้าของ]\n\nตัวอย่าง:\nบันทึกบัญชี พร้อมเพย์ 0891234567 สมชาย'
     });
   }
 
-  // 3. VIEW BANK ACCOUNTS COMMAND
+  // 3. VIEW BANK ACCOUNTS / PROMPTPAY QR CODES
   if (/^(ดู\s*บัญชี|ดู\s*เลขบัญชี|ตรวจ\s*บัญชี|เช็ค\s*บัญชี|\/accounts)$/i.test(text)) {
     const allUsers = db.getAllUsers();
     const registeredUsers = allUsers.filter(u => u.bankName && u.accountNumber);
@@ -216,18 +241,34 @@ ${bankLabel}
     if (registeredUsers.length === 0) {
       return line.replyMessage(replyToken, {
         type: 'text',
-        text: 'ยังไม่มีสมาชิกบันทึกบัญชีในระบบค่ะ 😊\nรบกวนพิมพ์ "บันทึกบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ]" เพื่อบันทึกนะคะ'
+        text: 'ยังไม่มีสมาชิกบันทึกบัญชีในระบบค่ะ 😊\nรบกวนพิมพ์ "บันทึกบัญชี [เลขบัญชี/เบอร์โทร] [ชื่อ]" เพื่อบันทึกนะคะ'
       });
     }
 
     let accountsListText = `📋 ข้อมูลเลขบัญชีของสมาชิกในกลุ่ม (น้องส้มบันทึกไว้ค่ะ):\n\n`;
+    const messages = [];
+
     registeredUsers.forEach((u, index) => {
       const bankLabel = getBankLabel(u.bankName);
-      accountsListText += `${index + 1}. ${u.displayName}\n   ${bankLabel}\n   🔢 เลขบัญชี: ${u.accountNumber}\n   👤 ชื่อ: ${u.accountName || u.displayName}\n\n`;
+      accountsListText += `${index + 1}. ${u.displayName}\n   ${bankLabel}\n   🔢 เลข/เบอร์: ${u.accountNumber}\n   👤 ชื่อ: ${u.accountName || u.displayName}\n\n`;
     });
-    accountsListText += `สามารถคัดลอกเลขบัญชีไปโอนเงินได้เลยนะคะ 😊`;
+    accountsListText += `สามารถคัดลอกเลขบัญชี หรือสแกนรูป QR ด้านล่างเพื่อโอนได้เลยนะคะ 😊`;
 
-    return line.replyMessage(replyToken, { type: 'text', text: accountsListText });
+    messages.push({ type: 'text', text: accountsListText });
+
+    // Send PromptPay QR images for registered users (Max 4 images to avoid LINE 5-message limit)
+    registeredUsers.slice(0, 4).forEach(u => {
+      const qrUrl = getPromptPayQrUrl(u.accountNumber);
+      if (qrUrl) {
+        messages.push({
+          type: 'image',
+          originalContentUrl: qrUrl,
+          previewImageUrl: qrUrl
+        });
+      }
+    });
+
+    return line.replyMessage(replyToken, messages);
   }
 
   // 4. VIEW LOGGED EXPENSE ITEMS IN ACTIVE BILL
@@ -251,10 +292,10 @@ ${bankLabel}
     return line.replyMessage(replyToken, { type: 'text', text: itemListText });
   }
 
-  // 5. DELETE / CANCEL SPECIFIC EXPENSE ITEM (e.g. "ลบรายการ 2" or "ยกเลิกรายการ 1")
+  // 5. DELETE / CANCEL SPECIFIC EXPENSE ITEM
   const deleteItemRegex = /^(?:ลบ\s*รายการ|ยกเลิก\s*รายการ|ลบ\s*ยอด)\s+(\d+)$/i;
   if (deleteItemRegex.test(text)) {
-    const itemIndex = parseInt(text.match(deleteItemRegex)[1]) - 1; // 0-based index
+    const itemIndex = parseInt(text.match(deleteItemRegex)[1]) - 1;
 
     const activeBill = db.getActiveBill(groupId);
     if (!activeBill || !activeBill.payers || activeBill.payers.length === 0) {
@@ -461,7 +502,7 @@ ${names}
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 9. SETTLE / CALCULATE BILL COMMAND
+  // 9. SETTLE / CALCULATE BILL COMMAND (With Automatic PromptPay QR Images)
   if (/^(สรุปยอด|คำนวณ|คิดเงิน|สรุปบิล)$/i.test(text)) {
     const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
@@ -483,7 +524,7 @@ ${names}
     const totalAmount = updatedBill.totalAmount || 0;
     const splitAmount = numParticipants > 0 ? (totalAmount / numParticipants) : 0;
 
-    let replyMsg = `📋 สรุปยอดเงินปาร์ตี้ (น้องส้มคิดเงินเรียบร้อยค่ะ):
+    let replyMsgText = `📋 สรุปยอดเงินปาร์ตี้ (น้องส้มคิดเงินเรียบร้อยค่ะ):
 
 ปาร์ตี้/มื้ออาหาร: ${updatedBill.title}
 ยอดรวมทั้งสิ้น: ${totalAmount.toLocaleString('th-TH')} บาท
@@ -495,34 +536,53 @@ ${names}
     if (updatedBill.participantBalances) {
       updatedBill.participantBalances.forEach(p => {
         if (p.net > 0.05) {
-          replyMsg += `• ${p.displayName}: ออกเงินไป ${p.totalPaid.toLocaleString('th-TH')} บาท (ได้รับคืน ${p.net.toLocaleString('th-TH')} บาท)\n`;
+          replyMsgText += `• ${p.displayName}: ออกเงินไป ${p.totalPaid.toLocaleString('th-TH')} บาท (ได้รับคืน ${p.net.toLocaleString('th-TH')} บาท)\n`;
         } else if (p.net < -0.05) {
-          replyMsg += `• ${p.displayName}: ออกเงินไป ${p.totalPaid.toLocaleString('th-TH')} บาท (ต้องโอนเพิ่ม ${Math.abs(p.net).toLocaleString('th-TH')} บาท)\n`;
+          replyMsgText += `• ${p.displayName}: ออกเงินไป ${p.totalPaid.toLocaleString('th-TH')} บาท (ต้องโอนเพิ่ม ${Math.abs(p.net).toLocaleString('th-TH')} บาท)\n`;
         } else {
-          replyMsg += `• ${p.displayName}: ออกเงินไป ${p.totalPaid.toLocaleString('th-TH')} บาท (จ่ายพอดีเป๊ะ)\n`;
+          replyMsgText += `• ${p.displayName}: ออกเงินไป ${p.totalPaid.toLocaleString('th-TH')} บาท (จ่ายพอดีเป๊ะ)\n`;
         }
       });
     }
 
-    replyMsg += `\n👇 รายการโอนเงินคืน (โอนคืนให้ตรงบัญชีผู้รับโอนนะคะ):\n\n`;
+    replyMsgText += `\n👇 รายการโอนเงินคืน (กดสแกนรูป QR ด้านล่างเพื่อโอนเงินได้เลยนะคะ):\n\n`;
+
+    const messages = [];
 
     if (!updatedBill.transfers || updatedBill.transfers.length === 0) {
-      replyMsg += `🎉 สมาชิกทุกท่านจ่ายเงินเท่ากันพอดี ไม่ต้องโอนคืนกันค่ะ`;
+      replyMsgText += `🎉 สมาชิกทุกท่านจ่ายเงินเท่ากันพอดี ไม่ต้องโอนคืนกันค่ะ`;
+      messages.push({ type: 'text', text: replyMsgText });
     } else {
       updatedBill.transfers.forEach((t, index) => {
         const receiver = db.getUser(t.toUserId);
         let bankText = 'ยังไม่ได้บันทึกบัญชีในระบบค่ะ';
         if (receiver && receiver.bankName && receiver.accountNumber) {
-          bankText = `${getBankLabel(receiver.bankName)}\n   เลขบัญชี: ${receiver.accountNumber}\n   ชื่อบัญชี: ${receiver.accountName || receiver.displayName}`;
+          bankText = `${getBankLabel(receiver.bankName)}\n   เลข/เบอร์: ${receiver.accountNumber}\n   ชื่อบัญชี: ${receiver.accountName || receiver.displayName}`;
         }
 
-        replyMsg += `${index + 1}. ${t.fromName} ➡️ โอนให้ ${t.toName}\n   💵 ยอดโอน: ${t.amount.toLocaleString('th-TH')} บาท\n   ${bankText}\n\n`;
+        replyMsgText += `${index + 1}. ${t.fromName} ➡️ โอนให้ ${t.toName}\n   💵 ยอดโอนสุทธิ: ${t.amount.toLocaleString('th-TH')} บาท\n   ${bankText}\n\n`;
+      });
+
+      replyMsgText += `👉 โอนเงินเรียบร้อยแล้วพิมพ์ "ปิดบิล" เพื่อจบรายการนะคะ 😊`;
+      messages.push({ type: 'text', text: replyMsgText });
+
+      // Generate dynamic PromptPay QR code images with embedded transfer amounts
+      updatedBill.transfers.slice(0, 4).forEach(t => {
+        const receiver = db.getUser(t.toUserId);
+        if (receiver && receiver.accountNumber) {
+          const qrUrl = getPromptPayQrUrl(receiver.accountNumber, t.amount);
+          if (qrUrl) {
+            messages.push({
+              type: 'image',
+              originalContentUrl: qrUrl,
+              previewImageUrl: qrUrl
+            });
+          }
+        }
       });
     }
 
-    replyMsg += `👉 โอนเงินเรียบร้อยแล้วพิมพ์ "ปิดบิล" เพื่อจบรายการนะคะ 😊`;
-
-    return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
+    return line.replyMessage(replyToken, messages);
   }
 
   // 10. CLOSE BILL / CANCEL BILL
@@ -662,12 +722,11 @@ function sendHelpMessage(replyToken) {
 
 💡 คำสั่งใช้งานกับน้องส้ม:
 
-1. บันทึกบัญชีของคุณ (สำหรับรับเงินคืน)
-👉 พิมพ์: บันทึกบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อบัญชี]
-เช่น: บันทึกบัญชี กรุงเทพ 123-4-56789-0 สมชาย
+1. บันทึก PromptPay QR ของคุณ
+👉 พิมพ์: "บันทึก 0891234567 สมชาย"
 
 2. เรียกดูบัญชีสมาชิกในกลุ่ม
-👉 พิมพ์: ดูบัญชี หรือ ตรวจ บัญชี
+👉 พิมพ์: "ดูบัญชี" หรือ "ตรวจ บัญชี"
 
 3. ลงรายการค่าอาหาร/ค่าใช้จ่าย
 👉 พิมพ์: "ค่าขนม 200" หรือ "จ่าย 800 ค่าเค้ก"
@@ -675,8 +734,8 @@ function sendHelpMessage(replyToken) {
 4. ดูและลบรายการที่พิมพ์ผิด
 👉 พิมพ์: "ดูรายการ" หรือ "ลบรายการ 2"
 
-5. คิดเงินสรุปยอด (คำนวณผู้รับคืน/โอนเพิ่มอัตโนมัติ)
-👉 พิมพ์: สรุปยอด`;
+5. คิดเงินสรุปยอด (สร้างรูป QR พร้อมระบุยอดโอนให้อัตโนมัติ)
+👉 พิมพ์: "สรุปยอด"`;
 
   return line.replyMessage(replyToken, {
     type: 'text',
