@@ -46,11 +46,11 @@ async function handleJoinGroup(event) {
 น้องส้มผู้ช่วยหารค่าอาหารประจำกลุ่มรายงานตัวค่ะ!
 
 💡 ฟีเจอร์ที่น้องส้มช่วยได้:
-1. 📸 **สแกนใบเสร็จ/สลิป:** ถ่ายรูปใบเสร็จส่งในกลุ่ม น้องส้มจะอ่านยอดเงินและเปิดหารให้อัตโนมัติ!
-2. 💸 **หารค่าอาหาร:** พิมพ์ "หารเท่ากัน 1200 ค่าชาบู" หรือ "ค่าหมูจุ่ม 650"
+1. 📸 **สแกนใบเสร็จ/สลิป:** ถ่ายรูปใบเสร็จส่งในกลุ่ม น้องส้มจะบันทึกยอดเงินให้อัตโนมัติ!
+2. 💸 **ลงรายการค่าใช้จ่าย:** พิมพ์ "ค่าอาหาร ร้านหมูจุ่ม 650" หรือ "จ่าย 800 ค่าเค้ก"
 3. 🪪 **บันทึกเลขบัญชี:** พิมพ์ "บันทึกบัญชี [ธนาคาร] [เลขบัญชี] [ชื่อ]"
 4. 📋 **เรียกดูบัญชี:** พิมพ์ "ดูบัญชี" หรือ "ตรวจบัญชี"
-5. 💰 **คิดเงินเคลียร์ยอด:** พิมพ์ "สรุปยอด"
+5. 🧮 **คิดเงินเคลียร์ยอด:** พิมพ์ "สรุปยอด" (คิดส่วนต่างใครต้องรับเงินคืน/โอนเพิ่มอัตโนมัติ!)
 
 ยินดีที่ได้รู้จักทุกคนนะคะ! 😊`;
 
@@ -92,96 +92,44 @@ async function handleImageMessage(event) {
     pictureUrl: profile.pictureUrl
   });
 
-  const activeBill = db.getActiveBill(groupId);
+  let activeBill = db.getActiveBill(groupId);
+  if (!activeBill) {
+    activeBill = db.createBill(groupId, userId, scanResult.merchantName, 'multi');
+  }
 
-  if (activeBill) {
-    if (activeBill.type === 'equal') {
-      const updatedBill = db.updateBill(activeBill.id, (b) => {
-        b.totalAmount = (b.totalAmount || 0) + scanResult.totalAmount;
-        b.title = b.title ? `${b.title} + ${scanResult.merchantName}` : scanResult.merchantName;
-        return b;
-      });
-
-      const names = updatedBill.participants.map((p, i) => `${i + 1}. ${p.displayName}`).join('\n');
-      const numP = updatedBill.participants.length || 1;
-      const splitAmount = Math.round((updatedBill.totalAmount / numP) * 100) / 100;
-
-      const replyMsg = `✨ น้องส้มสแกนใบเสร็จเพิ่มเรียบร้อยค่ะ! 🧾
-
-🏪 รายการเพิ่มเติม: ${scanResult.merchantName} (${scanResult.totalAmount.toLocaleString('th-TH')} บาท)
-💵 ยอดรวมมื้อนี้อัปเดตเป็น: ${updatedBill.totalAmount.toLocaleString('th-TH')} บาท
-
-👥 สมาชิกที่เข้าร่วม (${numP} คน):
-${names}
-
-💰 ตกคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
-
-👉 สมาชิกท่านอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
-👉 เมื่อเรียบร้อยพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
-
-      return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
-    } else if (activeBill.type === 'multi') {
-      const updatedBill = db.updateBill(activeBill.id, (b) => {
-        if (!b.participants.some(p => p.userId === userId)) {
-          b.participants.push({
-            userId: userId,
-            displayName: profile.displayName,
-            share: 0,
-            hasPaid: false
-          });
-        }
-        b.payers.push({
-          userId: userId,
-          displayName: profile.displayName,
-          amountPaid: scanResult.totalAmount,
-          itemName: scanResult.merchantName,
-          timestamp: Date.now()
-        });
-        return b;
-      });
-
-      let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
-
-      const replyMsg = `✨ น้องส้มอ่านสลิป/ใบเสร็จเรียบร้อยค่ะ 🧾
-
-🏪 ร้าน/รายการ: ${scanResult.merchantName}
-💵 ยอดเงิน: ${scanResult.totalAmount.toLocaleString('th-TH')} บาท
-👤 ผู้ชำระ: ${profile.displayName}
-
-บันทึกยอดลงปาร์ตี้ "${activeBill.title}" เรียบร้อยค่ะ!
-💵 ยอดรวมปาร์ตี้ขณะนี้: ${total.toLocaleString('th-TH')} บาท`;
-
-      return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
-    }
-  } else {
-    const bill = db.createBill(groupId, userId, scanResult.merchantName, 'equal');
-    const updatedBill = db.updateBill(bill.id, (b) => {
-      b.totalAmount = scanResult.totalAmount;
+  const updatedBill = db.updateBill(activeBill.id, (b) => {
+    if (!b.participants.some(p => p.userId === userId)) {
       b.participants.push({
         userId: userId,
         displayName: profile.displayName,
         share: 0,
         hasPaid: false
       });
-      return b;
+    }
+    b.payers.push({
+      userId: userId,
+      displayName: profile.displayName,
+      amountPaid: scanResult.totalAmount,
+      itemName: scanResult.merchantName,
+      timestamp: Date.now()
     });
+    return b;
+  });
 
-    const replyMsg = `✨ น้องส้มอ่านใบเสร็จเรียบร้อยค่ะ 🧾
+  let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
+
+  const replyMsg = `✨ น้องส้มอ่านสลิป/ใบเสร็จเรียบร้อยค่ะ 🧾
 
 🏪 ร้าน/รายการ: ${scanResult.merchantName}
-💵 ยอดรวมสุทธิ: ${scanResult.totalAmount.toLocaleString('th-TH')} บาท
+💵 ยอดเงิน: ${scanResult.totalAmount.toLocaleString('th-TH')} บาท
+👤 ผู้ชำระ: ${profile.displayName}
 
-น้องส้มเปิดหารค่าอาหารมื้อนี้ให้อัตโนมัติค่ะ
+บันทึกยอดลงปาร์ตี้ "${updatedBill.title}" เรียบร้อยค่ะ!
+💵 ยอดรวมสะสมขณะนี้: ${total.toLocaleString('th-TH')} บาท
+👉 สมาชิกพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
+👉 เมื่อลงครบแล้วพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
 
-👥 สมาชิกที่เข้าร่วม (1 คน):
-1. ${profile.displayName}
-
-👉 สมาชิกท่านอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
-👉 สามารถพิมพ์ลงยอดเพิ่มได้ เช่น "ค่าอาหาร ร้านหมูจุ่ม 650"
-👉 เมื่อเรียบร้อยพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
-
-    return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
-  }
+  return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
 }
 
 /**
@@ -274,60 +222,13 @@ ${bankLabel}
     return line.replyMessage(replyToken, { type: 'text', text: accountsListText });
   }
 
-  // 4. EQUAL SPLIT COMMAND
-  if (/^(หาร\s*เท่ากัน|หาร\s*เท่า)/i.test(text)) {
-    const equalRegex = /^(?:หาร\s*เท่ากัน|หาร\s*เท่า)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
-    if (equalRegex.test(text)) {
-      const match = text.match(equalRegex);
-      const totalAmount = parseFloat(match[1]);
-      const title = match[2] || 'ค่าอาหารมื้อนี้';
-
-      const profile = await line.getUserProfile(userId, groupId);
-      db.saveUser(userId, {
-        displayName: profile.displayName,
-        pictureUrl: profile.pictureUrl
-      });
-
-      const bill = db.createBill(groupId, userId, title, 'equal');
-      const updatedBill = db.updateBill(bill.id, (b) => {
-        b.totalAmount = totalAmount;
-        b.participants.push({
-          userId: userId,
-          displayName: profile.displayName,
-          share: 0,
-          hasPaid: false
-        });
-        return b;
-      });
-
-      const replyMsg = `💸 น้องส้มเปิดหารเท่ากันมื้อนี้เรียบร้อยค่ะ!
-
-มื้ออาหาร: ${updatedBill.title}
-ยอดรวม: ${totalAmount.toLocaleString('th-TH')} บาท
-
-👥 สมาชิกที่เข้าร่วม (1 คน):
-1. ${profile.displayName}
-
-👉 สมาชิกท่านอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
-👉 สามารถพิมพ์เพิ่มรายการ เช่น "ค่าอาหาร ร้านหมูจุ่ม 650"
-👉 เมื่อเรียบร้อยพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
-
-      return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
-    } else {
-      return line.replyMessage(replyToken, {
-        type: 'text',
-        text: '📌 รบกวนระบุยอดเงินรวมด้วยนะคะ 😊\n\n👉 ตัวอย่าง: หารเท่ากัน 1200 ค่าชาบู (หรือส่งรูปใบเสร็จเข้ามาได้ค่ะ)'
-      });
-    }
-  }
-
-  // 5. JOIN BILL COMMAND
+  // 4. JOIN BILL COMMAND
   if (/^(เข้าร่วม|ร่วมหาร|ร่วมปาร์ตี้)$/i.test(text)) {
     const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
       return line.replyMessage(replyToken, {
         type: 'text',
-        text: 'ยังไม่มีบิลที่เปิดอยู่ขณะนี้ค่ะ รบกวนพิมพ์ "หารเท่ากัน" หรือ "เริ่มเฉลี่ย" ก่อนนะคะ 😊'
+        text: 'ยังไม่มีบิลที่เปิดอยู่ขณะนี้ค่ะ รบกวนส่งรูปใบเสร็จหรือพิมพ์ลงรายการค่าใช้จ่ายก่อนนะคะ 😊'
       });
     }
 
@@ -357,25 +258,26 @@ ${bankLabel}
     });
 
     const names = updatedBill.participants.map((p, i) => `${i + 1}. ${p.displayName}`).join('\n');
-    const splitAmount = Math.round((updatedBill.totalAmount / updatedBill.participants.length) * 100) / 100;
+    let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
+    const splitAmount = Math.round((total / updatedBill.participants.length) * 100) / 100;
 
     const replyMsg = `🙋‍♂️ ${profile.displayName} เข้าร่วมหารแล้วค่ะ!
 
-มื้ออาหาร: ${updatedBill.title}
-ยอดรวม: ${updatedBill.totalAmount ? updatedBill.totalAmount.toLocaleString('th-TH') : '0'} บาท
+ปาร์ตี้/มื้ออาหาร: ${updatedBill.title}
+ยอดรวมสะสม: ${total.toLocaleString('th-TH')} บาท
 
 👥 สมาชิกที่เข้าร่วม (${updatedBill.participants.length} คน):
 ${names}
 
-💰 ตกคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
+💰 เฉลี่ยคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
 
 👉 พิมพ์ "เข้าร่วม" เพิ่มได้ค่ะ
-👉 เมื่อครบแล้ว พิมพ์ "สรุปยอด" ได้เลยนะคะ 😊`;
+👉 เมื่อลงรายการครบแล้ว พิมพ์ "สรุปยอด" ได้เลยนะคะ 😊`;
 
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 6. START MULTI-PAYER PARTY COMMAND
+  // 5. START MULTI-PAYER PARTY COMMAND
   const multiRegex = /^(?:เริ่ม\s*เฉลี่ย|เริ่ม\s*ปาร์ตี้|สร้าง\s*ปาร์ตี้)\s*(.+)?$/i;
   if (multiRegex.test(text)) {
     const match = text.match(multiRegex);
@@ -406,201 +308,86 @@ ${names}
 1. ${profile.displayName}
 
 👉 พิมพ์ "เข้าร่วม" เพื่อเข้าปาร์ตี้
-👉 ผู้ชำระเงินก่อน พิมพ์ "จ่าย [ยอด] ค่า [รายการ]" หรือส่งรูปสลิป/ใบเสร็จเข้ามาได้เลยค่ะ
+👉 ผู้ชำระเงิน พิมพ์ "จ่าย [ยอด] ค่า [รายการ]" หรือส่งรูปสลิป/ใบเสร็จเข้ามาได้เลยค่ะ
 👉 สรุปยอดพิมพ์ "สรุปยอด" นะคะ 😊`;
 
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 7. RECORD EXPENSE COMMAND
-  if (/^(จ่าย|ออกค่า)/i.test(text)) {
-    const payRegex = /^(?:จ่าย|ออกค่า)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
-    if (payRegex.test(text)) {
-      const match = text.match(payRegex);
-      const amount = parseFloat(match[1]);
-      const itemName = match[2] || 'ค่าใช้จ่ายทั่วไป';
-
-      const activeBill = db.getActiveBill(groupId);
-      if (!activeBill) {
-        return line.replyMessage(replyToken, {
-          type: 'text',
-          text: 'ยังไม่มีปาร์ตี้ที่เปิดหารอยู่ขณะนี้ค่ะ รบกวนพิมพ์ "เริ่มเฉลี่ย [ชื่อทริป]" เพื่อเปิดบิลก่อนนะคะ 😊'
-        });
-      }
-
-      if (activeBill.status !== 'collecting') {
-        return line.replyMessage(replyToken, {
-          type: 'text',
-          text: `บิล "${activeBill.title}" สรุปยอดเรียบร้อยแล้วค่ะ`
-        });
-      }
-
-      if (activeBill.type !== 'multi') {
-        return line.replyMessage(replyToken, {
-          type: 'text',
-          text: `บิล "${activeBill.title}" เป็นแบบหารเท่ากันยอดคงที่ค่ะ หากต้องการบันทึกยอดเพิ่มให้พิมพ์ "เพิ่ม [ยอดเงิน] [รายการ]"`
-        });
-      }
-
-      const profile = await line.getUserProfile(userId, groupId);
-      db.saveUser(userId, {
-        displayName: profile.displayName,
-        pictureUrl: profile.pictureUrl
-      });
-
-      const updatedBill = db.updateBill(activeBill.id, (b) => {
-        if (!b.participants.some(p => p.userId === userId)) {
-          b.participants.push({
-            userId: userId,
-            displayName: profile.displayName,
-            share: 0,
-            hasPaid: false
-          });
-        }
-        b.payers.push({
-          userId: userId,
-          displayName: profile.displayName,
-          amountPaid: amount,
-          itemName: itemName,
-          timestamp: Date.now()
-        });
-        return b;
-      });
-
-      let paymentsText = updatedBill.payers.map(p => `• ${p.displayName} จ่ายค่า${p.itemName}: ${p.amountPaid.toLocaleString('th-TH')} บาท`).join('\n');
-      let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
-
-      const replyMsg = `📝 บันทึกรายจ่ายเรียบร้อยค่ะ
-
-ปาร์ตี้: ${updatedBill.title}
-
-💰 รายการที่ออกไปแล้ว:
-${paymentsText}
-
-💵 ยอดรวมสะสม: ${total.toLocaleString('th-TH')} บาท
-
-👉 เพิ่มรายการอื่นพิมพ์ "จ่าย [ยอด] ค่า [รายการ]" หรือส่งรูปสลิปเข้ามาได้ค่ะ
-👉 เมื่อลงครบแล้วพิมพ์ "สรุปยอด" ได้เลยนะคะ 😊`;
-
-      return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
-    }
-  }
-
-  // 8. SMART FLEXIBLE EXPENSE / ITEM PARSER
+  // 6. RECORD EXPENSE COMMAND (Support "จ่าย 800 ค่าเค้ก" or "ค่าอาหาร ร้านหมูจุ่ม 650" with precise Payer tracking)
+  const payPrefixRegex = /^(?:จ่าย|ออกค่า)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
   const addPrefixRegex = /^(?:บวก|เพิ่ม|บวกเพิ่ม)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
   const addSuffixRegex = /^(.+)\s+(\d+(?:\.\d+)?)$/i;
 
-  let addAmount = 0;
-  let addItemName = 'ค่าอาหาร/ค่าใช้จ่าย';
+  let payAmount = 0;
+  let payItemName = '';
 
-  if (addPrefixRegex.test(text)) {
+  if (payPrefixRegex.test(text)) {
+    const match = text.match(payPrefixRegex);
+    payAmount = parseFloat(match[1]);
+    payItemName = match[2] || 'ค่าใช้จ่ายทั่วไป';
+  } else if (addPrefixRegex.test(text)) {
     const match = text.match(addPrefixRegex);
-    addAmount = parseFloat(match[1]);
-    addItemName = match[2] || 'รายการเพิ่มเติม';
+    payAmount = parseFloat(match[1]);
+    payItemName = match[2] || 'รายการเพิ่มเติม';
   } else if (addSuffixRegex.test(text)) {
     const match = text.match(addSuffixRegex);
-    addItemName = match[1].trim();
-    addAmount = parseFloat(match[2]);
+    payItemName = match[1].trim();
+    payAmount = parseFloat(match[2]);
   }
 
-  if (addAmount > 0) {
+  if (payAmount > 0) {
     const profile = await line.getUserProfile(userId, groupId);
     db.saveUser(userId, {
       displayName: profile.displayName,
       pictureUrl: profile.pictureUrl
     });
 
-    const activeBill = db.getActiveBill(groupId);
+    let activeBill = db.getActiveBill(groupId);
+    if (!activeBill) {
+      activeBill = db.createBill(groupId, userId, payItemName, 'multi');
+    }
 
-    if (activeBill && activeBill.status === 'collecting') {
-      if (activeBill.type === 'equal') {
-        const updatedBill = db.updateBill(activeBill.id, (b) => {
-          b.totalAmount = (b.totalAmount || 0) + addAmount;
-          b.title = `${b.title} + ${addItemName}`;
-          return b;
-        });
-
-        const names = updatedBill.participants.map((p, i) => `${i + 1}. ${p.displayName}`).join('\n');
-        const numP = updatedBill.participants.length || 1;
-        const splitAmount = Math.round((updatedBill.totalAmount / numP) * 100) / 100;
-
-        const replyMsg = `✨ บันทึกค่าอาหารเพิ่มเติมเรียบร้อยค่ะ! 📝
-
-➕ เพิ่มรายการ: ${addItemName} (${addAmount.toLocaleString('th-TH')} บาท)
-💵 ยอดรวมมื้อนี้อัปเดตเป็น: ${updatedBill.totalAmount.toLocaleString('th-TH')} บาท
-
-👥 สมาชิกที่เข้าร่วม (${numP} คน):
-${names}
-
-💰 ตกคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
-
-👉 สมาชิกท่านอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
-👉 เมื่อเรียบร้อยพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
-
-        return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
-      } else if (activeBill.type === 'multi') {
-        const updatedBill = db.updateBill(activeBill.id, (b) => {
-          if (!b.participants.some(p => p.userId === userId)) {
-            b.participants.push({
-              userId: userId,
-              displayName: profile.displayName,
-              share: 0,
-              hasPaid: false
-            });
-          }
-          b.payers.push({
-            userId: userId,
-            displayName: profile.displayName,
-            amountPaid: addAmount,
-            itemName: addItemName,
-            timestamp: Date.now()
-          });
-          return b;
-        });
-
-        let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
-
-        const replyMsg = `📝 บันทึกรายจ่ายเพิ่มเติมเรียบร้อยค่ะ
-
-ปาร์ตี้: ${updatedBill.title}
-➕ รายการ: ${addItemName} (${addAmount.toLocaleString('th-TH')} บาท)
-👤 ผู้ชำระ: ${profile.displayName}
-
-💵 ยอดรวมสะสมขณะนี้: ${total.toLocaleString('th-TH')} บาท
-👉 เมื่อลงครบแล้วพิมพ์ "สรุปยอด" ได้เลยนะคะ 😊`;
-
-        return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
-      }
-    } else {
-      const bill = db.createBill(groupId, userId, addItemName, 'equal');
-      const updatedBill = db.updateBill(bill.id, (b) => {
-        b.totalAmount = addAmount;
+    const updatedBill = db.updateBill(activeBill.id, (b) => {
+      if (!b.participants.some(p => p.userId === userId)) {
         b.participants.push({
           userId: userId,
           displayName: profile.displayName,
           share: 0,
           hasPaid: false
         });
-        return b;
+      }
+      b.payers.push({
+        userId: userId,
+        displayName: profile.displayName,
+        amountPaid: payAmount,
+        itemName: payItemName,
+        timestamp: Date.now()
       });
+      return b;
+    });
 
-      const replyMsg = `💸 น้องส้มเปิดหารค่าอาหารมื้อนี้เรียบร้อยค่ะ!
+    let paymentsText = updatedBill.payers.map(p => `• ${p.displayName} จ่ายค่า${p.itemName}: ${p.amountPaid.toLocaleString('th-TH')} บาท`).join('\n');
+    let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
 
-มื้ออาหาร: ${addItemName}
-💵 ยอดรวม: ${addAmount.toLocaleString('th-TH')} บาท
+    const replyMsg = `📝 บันทึกรายจ่ายเรียบร้อยค่ะ!
 
-👥 สมาชิกที่เข้าร่วม (1 คน):
-1. ${profile.displayName}
+👤 ผู้ชำระ: ${profile.displayName}
+➕ รายการ: ${payItemName} (${payAmount.toLocaleString('th-TH')} บาท)
 
-👉 สมาชิกท่านอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
-👉 สามารถพิมพ์เพิ่มรายการได้อีก เช่น "ค่าขนม 300"
-👉 เมื่อเรียบร้อยพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
+💰 รายการทั้งหมดในบิลนี้:
+${paymentsText}
 
-      return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
-    }
+💵 ยอดรวมสะสมขณะนี้: ${total.toLocaleString('th-TH')} บาท
+
+👉 เพื่อนคนอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
+👉 เพิ่มรายการอื่นพิมพ์ "ค่าใช้จ่าย ราคา" หรือส่งรูปสลิปเข้ามาได้ค่ะ
+👉 เมื่อลงครบแล้วพิมพ์ "สรุปยอด" ได้เลยนะคะ 😊`;
+
+    return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 9. SETTLE / CALCULATE BILL COMMAND
+  // 7. SETTLE / CALCULATE BILL COMMAND (With Detailed Payer Net Breakdown & Minimization)
   if (/^(สรุปยอด|คำนวณ|คิดเงิน|สรุปบิล)$/i.test(text)) {
     const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
@@ -624,13 +411,26 @@ ${names}
 
     let replyMsg = `📋 สรุปยอดเงินปาร์ตี้ (น้องส้มคิดเงินเรียบร้อยค่ะ):
 
-ปาร์ตี้: ${updatedBill.title}
+ปาร์ตี้/มื้ออาหาร: ${updatedBill.title}
 ยอดรวมทั้งสิ้น: ${totalAmount.toLocaleString('th-TH')} บาท
 เฉลี่ยคนละ (${numParticipants} คน): ${Math.round(splitAmount * 100) / 100} บาท
 
-👇 รายการโอนเงินคืน:
-
+📊 สรุปยอดจ่ายสะสมของแต่ละคน:
 `;
+
+    if (updatedBill.participantBalances) {
+      updatedBill.participantBalances.forEach(p => {
+        if (p.net > 0.05) {
+          replyMsg += `• ${p.displayName}: ออกเงินไป ${p.totalPaid.toLocaleString('th-TH')} บาท (ได้รับคืน ${p.net.toLocaleString('th-TH')} บาท)\n`;
+        } else if (p.net < -0.05) {
+          replyMsg += `• ${p.displayName}: ออกเงินไป ${p.totalPaid.toLocaleString('th-TH')} บาท (ต้องโอนเพิ่ม ${Math.abs(p.net).toLocaleString('th-TH')} บาท)\n`;
+        } else {
+          replyMsg += `• ${p.displayName}: ออกเงินไป ${p.totalPaid.toLocaleString('th-TH')} บาท (จ่ายพอดีเป๊ะ)\n`;
+        }
+      });
+    }
+
+    replyMsg += `\n👇 รายการโอนเงินคืน (โอนคืนให้ตรงบัญชีผู้รับโอนนะคะ):\n\n`;
 
     if (!updatedBill.transfers || updatedBill.transfers.length === 0) {
       replyMsg += `🎉 สมาชิกทุกท่านจ่ายเงินเท่ากันพอดี ไม่ต้องโอนคืนกันค่ะ`;
@@ -651,7 +451,7 @@ ${names}
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 10. CLOSE BILL / CANCEL BILL
+  // 8. CLOSE BILL / CANCEL BILL
   if (/^(ปิดบิล|เคลียร์แล้ว)$/i.test(text)) {
     const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
@@ -705,7 +505,7 @@ async function handlePostback(event) {
 }
 
 /**
- * Settlement engine
+ * Settlement Engine (Multi-Payer Net Balance Calculation & Transaction Minimization)
  */
 function calculateSettlement(billId) {
   return db.updateBill(billId, (b) => {
@@ -718,81 +518,62 @@ function calculateSettlement(billId) {
       return b;
     }
 
-    if (b.type === 'equal') {
-      const splitAmount = Math.round((b.totalAmount / numParticipants) * 100) / 100;
-      const payerId = b.creatorId;
-      const payerObj = b.participants.find(p => p.userId === payerId);
-      const payerName = payerObj ? payerObj.displayName : 'ผู้สร้างบิล';
+    const totalExpense = (b.payers || []).reduce((sum, p) => sum + p.amountPaid, 0);
+    b.totalAmount = totalExpense;
 
-      b.participants.forEach(p => {
-        p.share = splitAmount;
-        if (p.userId !== payerId) {
-          b.transfers.push({
-            fromUserId: p.userId,
-            fromName: p.displayName,
-            toUserId: payerId,
-            toName: payerName,
-            amount: splitAmount
-          });
-        } else {
-          p.hasPaid = true;
-        }
-      });
-    } else if (b.type === 'multi') {
-      const totalExpense = b.payers.reduce((sum, p) => sum + p.amountPaid, 0);
-      b.totalAmount = totalExpense;
+    const sharePerPerson = Math.round((totalExpense / numParticipants) * 100) / 100;
 
-      const sharePerPerson = totalExpense / numParticipants;
+    const participantBalances = b.participants.map(p => {
+      const totalPaidByUser = (b.payers || [])
+        .filter(pr => pr.userId === p.userId)
+        .reduce((sum, pr) => sum + pr.amountPaid, 0);
       
-      const participantBalances = b.participants.map(p => {
-        const totalPaidByUser = b.payers
-          .filter(pr => pr.userId === p.userId)
-          .reduce((sum, pr) => sum + pr.amountPaid, 0);
-        
-        p.share = sharePerPerson;
-        
-        return {
-          userId: p.userId,
-          displayName: p.displayName,
-          net: totalPaidByUser - sharePerPerson
-        };
-      });
-
-      const debtors = participantBalances
-        .filter(p => p.net < 0)
-        .map(p => ({ ...p, net: -p.net }));
+      p.share = sharePerPerson;
       
-      const creditors = participantBalances
-        .filter(p => p.net > 0)
-        .map(p => ({ ...p }));
+      return {
+        userId: p.userId,
+        displayName: p.displayName,
+        totalPaid: totalPaidByUser,
+        net: Math.round((totalPaidByUser - sharePerPerson) * 100) / 100
+      };
+    });
 
-      debtors.sort((a, b) => b.net - a.net);
-      creditors.sort((a, b) => b.net - a.net);
+    b.participantBalances = participantBalances;
 
-      let dIdx = 0;
-      let cIdx = 0;
+    const debtors = participantBalances
+      .filter(p => p.net < -0.05)
+      .map(p => ({ ...p, net: -p.net }));
+    
+    const creditors = participantBalances
+      .filter(p => p.net > 0.05)
+      .map(p => ({ ...p }));
 
-      while (dIdx < debtors.length && cIdx < creditors.length) {
-        const debtor = debtors[dIdx];
-        const creditor = creditors[cIdx];
+    debtors.sort((a, b) => b.net - a.net);
+    creditors.sort((a, b) => b.net - a.net);
 
-        const transferAmount = Math.min(debtor.net, creditor.net);
-        if (transferAmount > 0.05) {
-          b.transfers.push({
-            fromUserId: debtor.userId,
-            fromName: debtor.displayName,
-            toUserId: creditor.userId,
-            toName: creditor.displayName,
-            amount: Math.round(transferAmount * 100) / 100
-          });
-        }
+    let dIdx = 0;
+    let cIdx = 0;
 
-        debtor.net -= transferAmount;
-        creditor.net -= transferAmount;
+    while (dIdx < debtors.length && cIdx < creditors.length) {
+      const debtor = debtors[dIdx];
+      const creditor = creditors[cIdx];
 
-        if (debtor.net < 0.05) dIdx++;
-        if (creditor.net < 0.05) cIdx++;
+      const transferAmount = Math.min(debtor.net, creditor.net);
+      if (transferAmount > 0.05) {
+        b.transfers.push({
+          fromUserId: debtor.userId,
+          fromName: debtor.displayName,
+          toUserId: creditor.userId,
+          toName: creditor.displayName,
+          amount: Math.round(transferAmount * 100) / 100
+        });
       }
+
+      debtor.net -= transferAmount;
+      creditor.net -= transferAmount;
+
+      if (debtor.net < 0.05) dIdx++;
+      if (creditor.net < 0.05) cIdx++;
     }
 
     return b;
@@ -814,16 +595,12 @@ function sendHelpMessage(replyToken) {
 2. เรียกดูบัญชีสมาชิกในกลุ่ม
 👉 พิมพ์: ดูบัญชี หรือ ตรวจ บัญชี
 
-3. เริ่มหารเท่ากันทุกคน (คนจ่ายมีคนเดียว)
-👉 พิมพ์: หารเท่ากัน [ยอดรวม] [ชื่ออาหาร]
-👉 หรือ 📸 ถ่ายรูปใบเสร็จส่งเข้ามาในกลุ่มได้เลยค่ะ!
-👉 หรือพิมพ์ตรงๆ: "ค่าอาหาร ร้านหมูจุ่ม 650" หรือ "ค่าขนม 300" (น้องส้มจะเปิดหารให้อัตโนมัติ!)
+3. ลงรายการค่าอาหาร/ค่าใช้จ่าย (จำผู้ชำระเงินทุกคน)
+👉 พิมพ์: "จ่าย 800 ค่าเค้ก" หรือ "ค่าหมูจุ่ม 650"
+👉 หรือ 📸 ถ่ายรูปสลิป/ใบเสร็จส่งเข้ามาในกลุ่มได้เลยค่ะ!
 
-4. เริ่มปาร์ตี้/ทริปที่ต่างคนต่างออกเงิน (เฉลี่ยหลายคน)
-👉 พิมพ์: เริ่มเฉลี่ย [ชื่อปาร์ตี้]
-👉 สมาชิกลงเงินที่จ่ายไป: จ่าย [ยอดเงิน] [ชื่อรายการ]
-👉 หรือ 📸 ถ่ายรูปสลิป/ใบเสร็จส่งเข้ามาได้ค่ะ!
-👉 คิดเงินเคลียร์ยอด: สรุปยอด`;
+4. คิดเงินสรุปยอด (คำนวณผู้รับคืน/โอนเพิ่มอัตโนมัติ)
+👉 พิมพ์: สรุปยอด`;
 
   return line.replyMessage(replyToken, {
     type: 'text',
