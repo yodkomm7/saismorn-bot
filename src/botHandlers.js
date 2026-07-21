@@ -151,7 +151,7 @@ ${names}
 1. ${profile.displayName}
 
 👉 สมาชิกท่านอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
-👉 พิมพ์ชื่อรายการและราคาเพิ่มได้ เช่น "ค่าอาหาร ร้านหมูจุ่ม 650"
+👉 สามารถพิมพ์ลงยอดเพิ่มได้ เช่น "ค่าอาหาร ร้านหมูจุ่ม 650"
 👉 เมื่อเรียบร้อยพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
 
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
@@ -159,7 +159,7 @@ ${names}
 }
 
 /**
- * Handle incoming text commands - Persona: น้องส้ม
+ * Handle incoming text commands - Persona: น้องส้ม (รองรับเว้นวรรค และเปิดบิลให้อัตโนมัติ)
  */
 async function handleTextMessage(event) {
   let text = event.message.text.trim();
@@ -175,27 +175,30 @@ async function handleTextMessage(event) {
     return sendHelpMessage(replyToken);
   }
 
-  // 2. REGISTER BANK ACCOUNT COMMAND & INCOMPLETE CHECKS
-  if (/^(บันทึก|บันทึกบัญชี|บันทึกเลขบัญชี)/i.test(text)) {
-    const registerRegex = /^(?:บันทึก|บันทึกบัญชี|บันทึกเลขบัญชี)\s*(?:บัญชี)?\s+(\S+)\s+(\S+)\s+(.+)$/i;
+  // 2. REGISTER BANK ACCOUNT COMMAND (Support flexible spaces e.g. "บันทึก บัญชี")
+  if (/^(บันทึก|บันทึก\s*บัญชี|บันทึก\s*เลขบัญชี)/i.test(text)) {
+    const registerRegex = /^(?:บันทึก|บันทึก\s*บัญชี|บันทึก\s*เลขบัญชี)\s+(.+)$/i;
     
     if (registerRegex.test(text)) {
-      const match = text.match(registerRegex);
-      const bankName = match[1];
-      const accountNumber = match[2];
-      const accountName = match[3];
+      const content = text.match(registerRegex)[1].trim();
+      const parts = content.split(/\s+/);
 
-      const profile = await line.getUserProfile(userId, groupId);
-      const user = db.saveUser(userId, {
-        displayName: profile.displayName,
-        pictureUrl: profile.pictureUrl,
-        bankName,
-        accountNumber,
-        accountName
-      });
+      if (parts.length >= 3) {
+        const bankName = parts[0];
+        const accountNumber = parts[1];
+        const accountName = parts.slice(2).join(' ');
 
-      const bankLabel = getBankLabel(user.bankName);
-      const replyMsg = `✨ บันทึกข้อมูลบัญชีเรียบร้อยค่ะ!
+        const profile = await line.getUserProfile(userId, groupId);
+        const user = db.saveUser(userId, {
+          displayName: profile.displayName,
+          pictureUrl: profile.pictureUrl,
+          bankName,
+          accountNumber,
+          accountName
+        });
+
+        const bankLabel = getBankLabel(user.bankName);
+        const replyMsg = `✨ บันทึกข้อมูลบัญชีเรียบร้อยค่ะ!
 
 ${bankLabel}
 🔢 เลขบัญชี: ${user.accountNumber}
@@ -203,41 +206,28 @@ ${bankLabel}
 
 น้องส้มบันทึกข้อมูลเรียบร้อยค่ะ สมาชิกสามารถพิมพ์ "ดูบัญชี" เพื่อเรียกดูได้ตลอดเวลานะคะ 😊`;
 
-      return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
+        return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
+      } else if (parts.length === 1) {
+        return line.replyMessage(replyToken, {
+          type: 'text',
+          text: `🏦 รับทราบธนาคาร "${parts[0]}" ค่ะ 😊\n\nรบกวนระบุเลขบัญชีและชื่อเจ้าของบัญชีเพิ่มเติมนะคะ\n\n👉 ตัวอย่าง: บันทึกบัญชี ${parts[0]} 123-4-56789-0 สมชาย`
+        });
+      } else if (parts.length === 2) {
+        return line.replyMessage(replyToken, {
+          type: 'text',
+          text: `📌 ได้รับเลขบัญชี ${parts[1]} ธนาคาร ${parts[0]} แล้วค่ะ 😊\n\nรบกวนระบุชื่อเจ้าของบัญชีต่อท้ายอีกนิดนะคะ\n\n👉 ตัวอย่าง: บันทึกบัญชี ${parts[0]} ${parts[1]} สมชาย`
+        });
+      }
     }
 
-    const onlyKeywordRegex = /^(?:บันทึก|บันทึกบัญชี|บันทึกเลขบัญชี)\s*(?:บัญชี)?$/i;
-    if (onlyKeywordRegex.test(text)) {
-      return line.replyMessage(replyToken, {
-        type: 'text',
-        text: '📌 รบกวนระบุข้อมูลบัญชีให้ครบถ้วนนะคะ 😊\n\nรูปแบบ: บันทึกบัญชี [ชื่อธนาคาร] [เลขบัญชี] [ชื่อเจ้าของบัญชี]\n\nตัวอย่าง:\nบันทึกบัญชี กรุงเทพ 123-4-56789-0 สมชาย'
-      });
-    }
-
-    const onlyBankRegex = /^(?:บันทึก|บันทึกบัญชี|บันทึกเลขบัญชี)\s*(?:บัญชี)?\s+(\S+)$/i;
-    if (onlyBankRegex.test(text)) {
-      const match = text.match(onlyBankRegex);
-      const bankName = match[1];
-      return line.replyMessage(replyToken, {
-        type: 'text',
-        text: `🏦 รับทราบธนาคาร "${bankName}" ค่ะ 😊\n\nรบกวนระบุเลขบัญชีและชื่อเจ้าของบัญชีเพิ่มเติมนะคะ\n\n👉 ตัวอย่าง: บันทึกบัญชี ${bankName} 123-4-56789-0 สมชาย`
-      });
-    }
-
-    const missingNameRegex = /^(?:บันทึก|บันทึกบัญชี|บันทึกเลขบัญชี)\s*(?:บัญชี)?\s+(\S+)\s+(\S+)$/i;
-    if (missingNameRegex.test(text)) {
-      const match = text.match(missingNameRegex);
-      const bankName = match[1];
-      const accountNumber = match[2];
-      return line.replyMessage(replyToken, {
-        type: 'text',
-        text: `📌 ได้รับเลขบัญชี ${accountNumber} ธนาคาร ${bankName} แล้วค่ะ 😊\n\nรบกวนระบุชื่อเจ้าของบัญชีต่อท้ายอีกนิดนะคะ\n\n👉 ตัวอย่าง: บันทึกบัญชี ${bankName} ${accountNumber} สมชาย`
-      });
-    }
+    return line.replyMessage(replyToken, {
+      type: 'text',
+      text: '📌 รบกวนระบุข้อมูลบัญชีให้ครบถ้วนนะคะ 😊\n\nรูปแบบ: บันทึกบัญชี [ชื่อธนาคาร] [เลขบัญชี] [ชื่อเจ้าของบัญชี]\n\nตัวอย่าง:\nบันทึกบัญชี กรุงเทพ 123-4-56789-0 สมชาย'
+    });
   }
 
-  // 3. VIEW BANK ACCOUNTS COMMAND
-  if (/^(ดูบัญชี|ดูเลขบัญชี|ตรวจบัญชี|เช็คบัญชี|\/accounts)$/i.test(text)) {
+  // 3. VIEW BANK ACCOUNTS COMMAND (Support space like "ตรวจ บัญชี", "ดู บัญชี", "เช็ค บัญชี")
+  if (/^(ดู\s*บัญชี|ดู\s*เลขบัญชี|ตรวจ\s*บัญชี|เช็ค\s*บัญชี|\/accounts)$/i.test(text)) {
     const allUsers = db.getAllUsers();
     const registeredUsers = allUsers.filter(u => u.bankName && u.accountNumber);
     
@@ -259,8 +249,8 @@ ${bankLabel}
   }
 
   // 4. EQUAL SPLIT COMMAND
-  if (/^(หารเท่ากัน|หารเท่า)/i.test(text)) {
-    const equalRegex = /^(?:หารเท่ากัน|หารเท่า)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
+  if (/^(หาร\s*เท่ากัน|หาร\s*เท่า)/i.test(text)) {
+    const equalRegex = /^(?:หาร\s*เท่ากัน|หาร\s*เท่า)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
     if (equalRegex.test(text)) {
       const match = text.match(equalRegex);
       const totalAmount = parseFloat(match[1]);
@@ -360,7 +350,7 @@ ${names}
   }
 
   // 6. START MULTI-PAYER PARTY COMMAND
-  const multiRegex = /^(?:เริ่มเฉลี่ย|เริ่มปาร์ตี้|สร้างปาร์ตี้)\s*(.+)?$/i;
+  const multiRegex = /^(?:เริ่ม\s*เฉลี่ย|เริ่ม\s*ปาร์ตี้|สร้าง\s*ปาร์ตี้)\s*(.+)?$/i;
   if (multiRegex.test(text)) {
     const match = text.match(multiRegex);
     const title = match[1] || 'ปาร์ตี้หารค่าใช้จ่าย';
@@ -396,7 +386,7 @@ ${names}
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 7. RECORD EXPENSE COMMAND (Fixed prefix: "จ่าย 500" or flexible: "ค่าอาหาร ร้านหมูจุ่ม 650" / "เพิ่ม 650 ค่าหมูจุ่ม")
+  // 7. RECORD EXPENSE COMMAND
   if (/^(จ่าย|ออกค่า)/i.test(text)) {
     const payRegex = /^(?:จ่าย|ออกค่า)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
     if (payRegex.test(text)) {
@@ -470,34 +460,34 @@ ${paymentsText}
     }
   }
 
-  // 8. ADDING ADDITIONAL EXPENSES TO ACTIVE BILL (Flexible matching e.g. "ค่าอาหาร ร้านหมูจุ่ม 650" or "เพิ่ม 650 ค่าหมูจุ่ม" or "บวก 650")
-  const activeBill = db.getActiveBill(groupId);
-  if (activeBill && activeBill.status === 'collecting') {
-    // Pattern 1: "บวก 650 ค่าหมูจุ่ม" or "เพิ่ม 650 ค่าหมูจุ่ม"
-    const addPrefixRegex = /^(?:บวก|เพิ่ม|บวกเพิ่ม)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
-    // Pattern 2: "ค่าอาหาร ร้านหมูจุ่ม 650" (Text ending with a number)
-    const addSuffixRegex = /^(.+)\s+(\d+(?:\.\d+)?)$/i;
+  // 8. SMART FLEXIBLE EXPENSE / ITEM PARSER (e.g. "ค่าอาหาร ร้านหมูจุ่ม 650", "ค่าหมูจุ่ม 500", "เพิ่ม 650")
+  const addPrefixRegex = /^(?:บวก|เพิ่ม|บวกเพิ่ม)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
+  const addSuffixRegex = /^(.+)\s+(\d+(?:\.\d+)?)$/i;
 
-    let addAmount = 0;
-    let addItemName = 'รายการเพิ่มเติม';
+  let addAmount = 0;
+  let addItemName = 'ค่าอาหาร/ค่าใช้จ่าย';
 
-    if (addPrefixRegex.test(text)) {
-      const match = text.match(addPrefixRegex);
-      addAmount = parseFloat(match[1]);
-      addItemName = match[2] || 'รายการเพิ่มเติม';
-    } else if (addSuffixRegex.test(text)) {
-      const match = text.match(addSuffixRegex);
-      addItemName = match[1].trim();
-      addAmount = parseFloat(match[2]);
-    }
+  if (addPrefixRegex.test(text)) {
+    const match = text.match(addPrefixRegex);
+    addAmount = parseFloat(match[1]);
+    addItemName = match[2] || 'รายการเพิ่มเติม';
+  } else if (addSuffixRegex.test(text)) {
+    const match = text.match(addSuffixRegex);
+    addItemName = match[1].trim();
+    addAmount = parseFloat(match[2]);
+  }
 
-    if (addAmount > 0) {
-      const profile = await line.getUserProfile(userId, groupId);
-      db.saveUser(userId, {
-        displayName: profile.displayName,
-        pictureUrl: profile.pictureUrl
-      });
+  if (addAmount > 0) {
+    const profile = await line.getUserProfile(userId, groupId);
+    db.saveUser(userId, {
+      displayName: profile.displayName,
+      pictureUrl: profile.pictureUrl
+    });
 
+    const activeBill = db.getActiveBill(groupId);
+
+    if (activeBill && activeBill.status === 'collecting') {
+      // Active bill exists -> Accumulate amount
       if (activeBill.type === 'equal') {
         const updatedBill = db.updateBill(activeBill.id, (b) => {
           b.totalAmount = (b.totalAmount || 0) + addAmount;
@@ -556,11 +546,39 @@ ${names}
 
         return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
       }
+    } else {
+      // No active bill exists -> Smart Auto-Create new equal split bill!
+      const bill = db.createBill(groupId, userId, addItemName, 'equal');
+      const updatedBill = db.updateBill(bill.id, (b) => {
+        b.totalAmount = addAmount;
+        b.participants.push({
+          userId: userId,
+          displayName: profile.displayName,
+          share: 0,
+          hasPaid: false
+        });
+        return b;
+      });
+
+      const replyMsg = `💸 น้องส้มเปิดหารค่าอาหารมื้อนี้เรียบร้อยค่ะ!
+
+มื้ออาหาร: ${addItemName}
+💵 ยอดรวม: ${addAmount.toLocaleString('th-TH')} บาท
+
+👥 สมาชิกที่เข้าร่วม (1 คน):
+1. ${profile.displayName}
+
+👉 สมาชิกท่านอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
+👉 สามารถพิมพ์เพิ่มรายการได้อีก เช่น "ค่าขนม 300"
+👉 เมื่อเรียบร้อยพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
+
+      return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
     }
   }
 
   // 9. SETTLE / CALCULATE BILL COMMAND
   if (/^(สรุปยอด|คำนวณ|คิดเงิน|สรุปบิล)$/i.test(text)) {
+    const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -611,6 +629,7 @@ ${names}
 
   // 10. CLOSE BILL / CANCEL BILL
   if (/^(ปิดบิล|เคลียร์แล้ว)$/i.test(text)) {
+    const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -631,6 +650,7 @@ ${names}
   }
 
   if (/^(ยกเลิกปาร์ตี้|ยกเลิกบิล|ยกเลิกหาร)$/i.test(text)) {
+    const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -768,12 +788,12 @@ function sendHelpMessage(replyToken) {
 เช่น: บันทึกบัญชี กรุงเทพ 123-4-56789-0 สมชาย
 
 2. เรียกดูบัญชีสมาชิกในกลุ่ม
-👉 พิมพ์: ดูบัญชี หรือ ตรวจบัญชี
+👉 พิมพ์: ดูบัญชี หรือ ตรวจ บัญชี
 
 3. เริ่มหารเท่ากันทุกคน (คนจ่ายมีคนเดียว)
 👉 พิมพ์: หารเท่ากัน [ยอดรวม] [ชื่ออาหาร]
 👉 หรือ 📸 ถ่ายรูปใบเสร็จส่งเข้ามาในกลุ่มได้เลยค่ะ!
-👉 เพิ่มยอดไม่มีใบเสร็จ: พิมพ์ "ค่าอาหาร ร้านหมูจุ่ม 650" หรือ "เพิ่ม 650"
+👉 หรือพิมพ์ตรงๆ: "ค่าอาหาร ร้านหมูจุ่ม 650" หรือ "ค่าขนม 300" (น้องส้มจะเปิดหารให้อัตโนมัติ!)
 
 4. เริ่มปาร์ตี้/ทริปที่ต่างคนต่างออกเงิน (เฉลี่ยหลายคน)
 👉 พิมพ์: เริ่มเฉลี่ย [ชื่อปาร์ตี้]
