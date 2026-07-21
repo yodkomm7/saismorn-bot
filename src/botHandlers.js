@@ -71,19 +71,27 @@ async function handleImageMessage(event) {
   if (activeBill) {
     if (activeBill.type === 'equal') {
       const updatedBill = db.updateBill(activeBill.id, (b) => {
-        b.totalAmount = scanResult.totalAmount;
-        b.title = scanResult.merchantName;
+        b.totalAmount = (b.totalAmount || 0) + scanResult.totalAmount;
+        b.title = b.title ? `${b.title} + ${scanResult.merchantName}` : scanResult.merchantName;
         return b;
       });
 
-      const replyMsg = `✨ น้องส้มอ่านใบเสร็จเรียบร้อยค่ะ 🧾
+      const names = updatedBill.participants.map((p, i) => `${i + 1}. ${p.displayName}`).join('\n');
+      const numP = updatedBill.participants.length || 1;
+      const splitAmount = Math.round((updatedBill.totalAmount / numP) * 100) / 100;
 
-🏪 ร้าน/รายการ: ${scanResult.merchantName}
-💵 ยอดรวมสุทธิ: ${scanResult.totalAmount.toLocaleString('th-TH')} บาท
+      const replyMsg = `✨ น้องส้มสแกนใบเสร็จเพิ่มเรียบร้อยค่ะ! 🧾
 
-น้องส้มอัปเดตยอดหารมื้อนี้เรียบร้อยค่ะ!
-👉 พิมพ์ "เข้าร่วม" เพื่อเข้าหาร
-👉 พิมพ์ "สรุปยอด" เมื่อเรียบร้อยนะคะ 😊`;
+🏪 รายการเพิ่มเติม: ${scanResult.merchantName} (${scanResult.totalAmount.toLocaleString('th-TH')} บาท)
+💵 ยอดรวมมื้อนี้อัปเดตเป็น: ${updatedBill.totalAmount.toLocaleString('th-TH')} บาท
+
+👥 สมาชิกที่เข้าร่วม (${numP} คน):
+${names}
+
+💰 ตกคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
+
+👉 สมาชิกท่านอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
+👉 เมื่อเรียบร้อยพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
 
       return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
     } else if (activeBill.type === 'multi') {
@@ -143,6 +151,7 @@ async function handleImageMessage(event) {
 1. ${profile.displayName}
 
 👉 สมาชิกท่านอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
+👉 พิมพ์ชื่อรายการและราคาเพิ่มได้ เช่น "ค่าอาหาร ร้านหมูจุ่ม 650"
 👉 เมื่อเรียบร้อยพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
 
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
@@ -150,7 +159,7 @@ async function handleImageMessage(event) {
 }
 
 /**
- * Handle incoming text commands - Persona: น้องส้ม (เรียบร้อย สุภาพ พูดน้อยกระชับ)
+ * Handle incoming text commands - Persona: น้องส้ม
  */
 async function handleTextMessage(event) {
   let text = event.message.text.trim();
@@ -197,7 +206,6 @@ ${bankLabel}
       return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
     }
 
-    // Incomplete Input Cases (น้องส้ม สุภาพ เรียบร้อย)
     const onlyKeywordRegex = /^(?:บันทึก|บันทึกบัญชี|บันทึกเลขบัญชี)\s*(?:บัญชี)?$/i;
     if (onlyKeywordRegex.test(text)) {
       return line.replyMessage(replyToken, {
@@ -285,6 +293,7 @@ ${bankLabel}
 1. ${profile.displayName}
 
 👉 สมาชิกท่านอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
+👉 สามารถพิมพ์เพิ่มรายการ เช่น "ค่าอาหาร ร้านหมูจุ่ม 650"
 👉 เมื่อเรียบร้อยพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
 
       return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
@@ -387,7 +396,7 @@ ${names}
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 7. RECORD EXPENSE COMMAND
+  // 7. RECORD EXPENSE COMMAND (Fixed prefix: "จ่าย 500" or flexible: "ค่าอาหาร ร้านหมูจุ่ม 650" / "เพิ่ม 650 ค่าหมูจุ่ม")
   if (/^(จ่าย|ออกค่า)/i.test(text)) {
     const payRegex = /^(?:จ่าย|ออกค่า)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
     if (payRegex.test(text)) {
@@ -413,7 +422,7 @@ ${names}
       if (activeBill.type !== 'multi') {
         return line.replyMessage(replyToken, {
           type: 'text',
-          text: `บิล "${activeBill.title}" เป็นแบบหารเท่ากันยอดคงที่ค่ะ`
+          text: `บิล "${activeBill.title}" เป็นแบบหารเท่ากันยอดคงที่ค่ะ หากต้องการบันทึกยอดเพิ่มให้พิมพ์ "เพิ่ม [ยอดเงิน] [รายการ]"`
         });
       }
 
@@ -458,17 +467,100 @@ ${paymentsText}
 👉 เมื่อลงครบแล้วพิมพ์ "สรุปยอด" ได้เลยนะคะ 😊`;
 
       return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
-    } else {
-      return line.replyMessage(replyToken, {
-        type: 'text',
-        text: '📌 รบกวนระบุยอดเงินด้วยนะคะ 😊\n\n👉 ตัวอย่าง: จ่าย 800 ค่าเค้ก (หรือส่งรูปสลิปเข้ามาได้ค่ะ)'
-      });
     }
   }
 
-  // 8. SETTLE / CALCULATE BILL COMMAND
+  // 8. ADDING ADDITIONAL EXPENSES TO ACTIVE BILL (Flexible matching e.g. "ค่าอาหาร ร้านหมูจุ่ม 650" or "เพิ่ม 650 ค่าหมูจุ่ม" or "บวก 650")
+  const activeBill = db.getActiveBill(groupId);
+  if (activeBill && activeBill.status === 'collecting') {
+    // Pattern 1: "บวก 650 ค่าหมูจุ่ม" or "เพิ่ม 650 ค่าหมูจุ่ม"
+    const addPrefixRegex = /^(?:บวก|เพิ่ม|บวกเพิ่ม)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
+    // Pattern 2: "ค่าอาหาร ร้านหมูจุ่ม 650" (Text ending with a number)
+    const addSuffixRegex = /^(.+)\s+(\d+(?:\.\d+)?)$/i;
+
+    let addAmount = 0;
+    let addItemName = 'รายการเพิ่มเติม';
+
+    if (addPrefixRegex.test(text)) {
+      const match = text.match(addPrefixRegex);
+      addAmount = parseFloat(match[1]);
+      addItemName = match[2] || 'รายการเพิ่มเติม';
+    } else if (addSuffixRegex.test(text)) {
+      const match = text.match(addSuffixRegex);
+      addItemName = match[1].trim();
+      addAmount = parseFloat(match[2]);
+    }
+
+    if (addAmount > 0) {
+      const profile = await line.getUserProfile(userId, groupId);
+      db.saveUser(userId, {
+        displayName: profile.displayName,
+        pictureUrl: profile.pictureUrl
+      });
+
+      if (activeBill.type === 'equal') {
+        const updatedBill = db.updateBill(activeBill.id, (b) => {
+          b.totalAmount = (b.totalAmount || 0) + addAmount;
+          b.title = `${b.title} + ${addItemName}`;
+          return b;
+        });
+
+        const names = updatedBill.participants.map((p, i) => `${i + 1}. ${p.displayName}`).join('\n');
+        const numP = updatedBill.participants.length || 1;
+        const splitAmount = Math.round((updatedBill.totalAmount / numP) * 100) / 100;
+
+        const replyMsg = `✨ บันทึกค่าอาหารเพิ่มเติมเรียบร้อยค่ะ! 📝
+
+➕ เพิ่มรายการ: ${addItemName} (${addAmount.toLocaleString('th-TH')} บาท)
+💵 ยอดรวมมื้อนี้อัปเดตเป็น: ${updatedBill.totalAmount.toLocaleString('th-TH')} บาท
+
+👥 สมาชิกที่เข้าร่วม (${numP} คน):
+${names}
+
+💰 ตกคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
+
+👉 สมาชิกท่านอื่นพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
+👉 เมื่อเรียบร้อยพิมพ์ "สรุปยอด" เพื่อคิดเงินนะคะ 😊`;
+
+        return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
+      } else if (activeBill.type === 'multi') {
+        const updatedBill = db.updateBill(activeBill.id, (b) => {
+          if (!b.participants.some(p => p.userId === userId)) {
+            b.participants.push({
+              userId: userId,
+              displayName: profile.displayName,
+              share: 0,
+              hasPaid: false
+            });
+          }
+          b.payers.push({
+            userId: userId,
+            displayName: profile.displayName,
+            amountPaid: addAmount,
+            itemName: addItemName,
+            timestamp: Date.now()
+          });
+          return b;
+        });
+
+        let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
+
+        const replyMsg = `📝 บันทึกรายจ่ายเพิ่มเติมเรียบร้อยค่ะ
+
+ปาร์ตี้: ${updatedBill.title}
+➕ รายการ: ${addItemName} (${addAmount.toLocaleString('th-TH')} บาท)
+👤 ผู้ชำระ: ${profile.displayName}
+
+💵 ยอดรวมสะสมขณะนี้: ${total.toLocaleString('th-TH')} บาท
+👉 เมื่อลงครบแล้วพิมพ์ "สรุปยอด" ได้เลยนะคะ 😊`;
+
+        return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
+      }
+    }
+  }
+
+  // 9. SETTLE / CALCULATE BILL COMMAND
   if (/^(สรุปยอด|คำนวณ|คิดเงิน|สรุปบิล)$/i.test(text)) {
-    const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -517,9 +609,8 @@ ${paymentsText}
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 9. CLOSE BILL / CANCEL BILL
+  // 10. CLOSE BILL / CANCEL BILL
   if (/^(ปิดบิล|เคลียร์แล้ว)$/i.test(text)) {
-    const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -540,7 +631,6 @@ ${paymentsText}
   }
 
   if (/^(ยกเลิกปาร์ตี้|ยกเลิกบิล|ยกเลิกหาร)$/i.test(text)) {
-    const activeBill = db.getActiveBill(groupId);
     if (!activeBill) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -683,6 +773,7 @@ function sendHelpMessage(replyToken) {
 3. เริ่มหารเท่ากันทุกคน (คนจ่ายมีคนเดียว)
 👉 พิมพ์: หารเท่ากัน [ยอดรวม] [ชื่ออาหาร]
 👉 หรือ 📸 ถ่ายรูปใบเสร็จส่งเข้ามาในกลุ่มได้เลยค่ะ!
+👉 เพิ่มยอดไม่มีใบเสร็จ: พิมพ์ "ค่าอาหาร ร้านหมูจุ่ม 650" หรือ "เพิ่ม 650"
 
 4. เริ่มปาร์ตี้/ทริปที่ต่างคนต่างออกเงิน (เฉลี่ยหลายคน)
 👉 พิมพ์: เริ่มเฉลี่ย [ชื่อปาร์ตี้]
