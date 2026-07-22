@@ -4,11 +4,9 @@ const path = require('path');
 
 const DB_PATH = path.join(__dirname, '..', 'db.json');
 
-// Free Permanent Cloud KV JSON Store endpoint
-const CLOUD_API_URL = 'https://api.jsonbin.io/v3/b';
-// Master Master Cloud Bin ID for Nong Som
-let cloudBinId = process.env.CLOUD_BIN_ID || '';
-const CLOUD_MASTER_KEY = '$2a$10$w8.2Z8vK7X5xR4zW9z6.1O7v9eK0X9vX5vX5vX5vX5vX5vX5vX5vX';
+// ExtendsClass JSON Storage API Bin ID for Nong Som Bot
+const CLOUD_BIN_ID = 'faedacc';
+const CLOUD_API_URL = `https://extendsclass.com/api/json-storage/bin/${CLOUD_BIN_ID}`;
 
 /**
  * Perform HTTPS Request
@@ -44,17 +42,12 @@ function httpRequest(options, data = null) {
  * Fetch latest database from Cloud
  */
 async function fetchFromCloud() {
-  if (!cloudBinId) return null;
-  
   try {
-    const url = new URL(`https://api.jsonbin.io/v3/b/${cloudBinId}/latest`);
+    const url = new URL(CLOUD_API_URL);
     const options = {
       hostname: url.hostname,
       path: url.pathname,
-      method: 'GET',
-      headers: {
-        'X-Bin-Meta': 'false'
-      }
+      method: 'GET'
     };
 
     const res = await httpRequest(options);
@@ -72,40 +65,19 @@ async function fetchFromCloud() {
  */
 async function saveToCloud(dbData) {
   try {
-    if (!cloudBinId) {
-      // Create new bin if not exists
-      const url = new URL('https://api.jsonbin.io/v3/b');
-      const options = {
-        hostname: url.hostname,
-        path: url.pathname,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Bin-Private': 'false',
-          'X-Bin-Name': 'nong_som_db'
-        }
-      };
-
-      const res = await httpRequest(options, dbData);
-      if (res && res.metadata && res.metadata.id) {
-        cloudBinId = res.metadata.id;
-        console.log(`Cloud DB initialized with Bin ID: ${cloudBinId}`);
-      }
-      return;
-    }
-
-    // Update existing bin
-    const url = new URL(`https://api.jsonbin.io/v3/b/${cloudBinId}`);
+    const url = new URL(CLOUD_API_URL);
+    const postData = JSON.stringify(dbData);
     const options = {
       hostname: url.hostname,
       path: url.pathname,
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
       }
     };
 
-    await httpRequest(options, dbData);
+    await httpRequest(options, postData);
   } catch (err) {
     console.warn('Failed to save DB to cloud:', err.message);
   }
