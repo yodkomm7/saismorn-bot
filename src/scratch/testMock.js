@@ -1,11 +1,8 @@
-const fs = require('fs');
 const path = require('path');
+const dotenv = require('dotenv');
+const { Pool } = require('pg');
 
-// Clean up existing db.json for fresh test
-const dbPath = path.join(__dirname, '..', '..', 'db.json');
-if (fs.existsSync(dbPath)) {
-  fs.unlinkSync(dbPath);
-}
+dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
 // Override lineClient so it runs in mock mode and logs to console
 process.env.LINE_CHANNEL_ACCESS_TOKEN = 'mock_channel_access_token';
@@ -13,6 +10,17 @@ process.env.LINE_CHANNEL_SECRET = 'mock_channel_secret';
 
 const db = require('../database');
 const botHandlers = require('../botHandlers');
+
+// Clean slate: wipe test rows for the mock group/users before running
+async function resetTestData() {
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+  });
+  await pool.query(`DELETE FROM bills WHERE group_id = 'C1234567890'`);
+  await pool.query(`DELETE FROM users WHERE id IN ('U1111111111', 'U2222222222', 'U3333333333')`);
+  await pool.end();
+}
 
 function assert(condition, message) {
   if (!condition) {
@@ -25,6 +33,7 @@ function assert(condition, message) {
 
 async function runMockTests() {
   console.log('=== STARTING LINE BOT MOCK TESTS ===\n');
+  await resetTestData();
 
   // Mock Event Creators
   const createTextMessage = (userId, groupId, text) => ({
@@ -66,23 +75,24 @@ async function runMockTests() {
   // User C registers as well
   await botHandlers.handleEvent(createTextMessage(userC, group1, 'บันทึกบัญชี ไทยพาณิชย์ 987-6-54321-0 สมเกียรติ ยอดเยี่ยม'));
 
-  const dbUserA = db.getUser(userA);
+  const dbUserA = await db.getUser(userA);
   assert(dbUserA !== null, 'User A registered in database');
   assert(dbUserA.bankName === 'กสิกร', 'User A bank name registered correctly');
   assert(dbUserA.accountNumber === '123-4-56789-0', 'User A bank account registered correctly');
   
-  const dbUserB = db.getUser(userB);
+  const dbUserB = await db.getUser(userB);
   assert(dbUserB !== null, 'User B registered in database');
   assert(dbUserB.bankName === 'พร้อมเพย์', 'User B bank name registered correctly');
 
   console.log('\n2. Testing Accounts Display...');
-  const allUsers = db.getAllUsers();
-  assert(allUsers.length === 3, 'Three users registered total');
+  const allUsers = await db.getAllUsers();
+  const testUsers = allUsers.filter(u => [userA, userB, userC].includes(u.id));
+  assert(testUsers.length === 3, 'Three test users registered');
 
   console.log('\n3. Testing Party Creation (Multi-Payer)...');
   await botHandlers.handleEvent(createTextMessage(userA, group1, 'เริ่มเฉลี่ย ทริปภูเก็ต'));
   
-  let activeBill = db.getActiveBill(group1);
+  let activeBill = await db.getActiveBill(group1);
   assert(activeBill !== null, 'Active bill found for group');
   assert(activeBill.title === 'ทริปภูเก็ต', 'Active bill title is correct');
   assert(activeBill.type === 'multi', 'Active bill type is multi');
@@ -93,7 +103,7 @@ async function runMockTests() {
   await botHandlers.handleEvent(createPostback(userB, group1, `action=join&billId=${activeBill.id}`));
   await botHandlers.handleEvent(createPostback(userC, group1, `action=join&billId=${activeBill.id}`));
 
-  activeBill = db.getBill(activeBill.id);
+  activeBill = await db.getBill(activeBill.id);
   assert(activeBill.participants.length === 3, 'Three participants in the party now');
   assert(activeBill.participants.some(p => p.userId === userB), 'User B joined successfully');
   assert(activeBill.participants.some(p => p.userId === userC), 'User C joined successfully');
@@ -104,7 +114,7 @@ async function runMockTests() {
   // User B pays 900 for Car Rental
   await botHandlers.handleEvent(createTextMessage(userB, group1, 'จ่าย 900 ค่ารถเช่า'));
 
-  activeBill = db.getBill(activeBill.id);
+  activeBill = await db.getBill(activeBill.id);
   assert(activeBill.payers.length === 2, 'Two payments registered');
   assert(activeBill.payers[0].amountPaid === 1500 && activeBill.payers[0].userId === userA, 'User A payment logged correctly');
   assert(activeBill.payers[1].amountPaid === 900 && activeBill.payers[1].userId === userB, 'User B payment logged correctly');
@@ -113,7 +123,7 @@ async function runMockTests() {
   // Trigger settlement
   await botHandlers.handleEvent(createTextMessage(userA, group1, 'สรุปยอด'));
 
-  activeBill = db.getBill(activeBill.id);
+  activeBill = await db.getBill(activeBill.id);
   assert(activeBill.status === 'settling', 'Bill status is now settling');
   assert(activeBill.totalAmount === 2400, 'Total expense is 2400');
   
@@ -140,9 +150,9 @@ async function runMockTests() {
   console.log('\n7. Testing Closing the Bill...');
   await botHandlers.handleEvent(createPostback(userA, group1, `action=close&billId=${activeBill.id}`));
 
-  activeBill = db.getBill(activeBill.id);
+  activeBill = await db.getBill(activeBill.id);
   assert(activeBill.status === 'closed', 'Bill status is closed');
-  assert(db.getActiveBill(group1) === null, 'No more active bills in the group');
+  assert(await db.getActiveBill(group1) === null, 'No more active bills in the group');
 
   console.log('\n=== ALL MOCK TESTS PASSED SUCCESSFULLY! ===');
 }

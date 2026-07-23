@@ -1,115 +1,123 @@
-const fs = require('fs');
-const path = require('path');
-const cloudDb = require('./cloudDb');
+const { Pool } = require('pg');
 
-const DB_PATH = path.join(__dirname, '..', 'db.json');
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
-// Initialize database file if it doesn't exist
-function initDb() {
-  if (!fs.existsSync(DB_PATH)) {
-    const initialData = {
-      users: {},
-      bills: {}
-    };
-    fs.writeFileSync(DB_PATH, JSON.stringify(initialData, null, 2), 'utf-8');
-  }
+async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      display_name TEXT,
+      picture_url TEXT,
+      bank_name TEXT,
+      account_number TEXT,
+      account_name TEXT,
+      updated_at BIGINT
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bills (
+      id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      data JSONB NOT NULL
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bills_group_status ON bills (group_id, status);`);
 }
 
-// Read database
-function readDb() {
-  initDb();
-  try {
-    const data = fs.readFileSync(DB_PATH, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    console.error('Error reading database file, resetting database:', error);
-    const initialData = { users: {}, bills: {} };
-    fs.writeFileSync(DB_PATH, JSON.stringify(initialData, null, 2), 'utf-8');
-    return initialData;
-  }
-}
+const ready = initDb().catch(err => {
+  console.error('Failed to initialize Postgres schema:', err);
+  throw err;
+});
 
-// Write database & sync to Permanent Cloud DB
-function writeDb(data) {
-  try {
-    fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), 'utf-8');
-    // Asynchronously save to Cloud DB for 24/7 permanent persistence
-    cloudDb.saveToCloud(data).catch(err => console.warn('Cloud sync background note:', err.message));
-  } catch (error) {
-    console.error('Error writing to database:', error);
-    throw error;
-  }
+function rowToUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    displayName: row.display_name,
+    pictureUrl: row.picture_url,
+    bankName: row.bank_name,
+    accountNumber: row.account_number,
+    accountName: row.account_name,
+    updatedAt: row.updated_at !== null ? Number(row.updated_at) : null
+  };
 }
-
-// Sync from Cloud DB on boot
-(async function syncCloudOnBoot() {
-  try {
-    const cloudData = await cloudDb.fetchFromCloud();
-    if (cloudData && (cloudData.users || cloudData.bills)) {
-      const localData = readDb();
-      const mergedData = {
-        users: { ...cloudData.users, ...localData.users },
-        bills: { ...cloudData.bills, ...localData.bills }
-      };
-      fs.writeFileSync(DB_PATH, JSON.stringify(mergedData, null, 2), 'utf-8');
-      console.log('Successfully synced and restored database from Permanent Cloud Store!');
-    }
-  } catch (err) {
-    console.warn('Startup cloud sync note:', err.message);
-  }
-})();
 
 const database = {
   // --- User Operations ---
-  getUser(userId) {
+  async getUser(userId) {
     if (!userId) return null;
-    const db = readDb();
-    return db.users[userId] || null;
+    await ready;
+    const res = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+    return rowToUser(res.rows[0]);
   },
 
-  saveUser(userId, userData) {
+  async saveUser(userId, userData) {
     if (!userId) return null;
-    const db = readDb();
-    const existing = db.users[userId] || { id: userId };
-    db.users[userId] = {
+    await ready;
+    const existing = await database.getUser(userId);
+    const merged = {
       ...existing,
       ...userData,
+      id: userId,
       updatedAt: Date.now()
     };
-    writeDb(db);
-    return db.users[userId];
+
+    await pool.query(
+      `INSERT INTO users (id, display_name, picture_url, bank_name, account_number, account_name, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (id) DO UPDATE SET
+         display_name = EXCLUDED.display_name,
+         picture_url = EXCLUDED.picture_url,
+         bank_name = EXCLUDED.bank_name,
+         account_number = EXCLUDED.account_number,
+         account_name = EXCLUDED.account_name,
+         updated_at = EXCLUDED.updated_at`,
+      [userId, merged.displayName, merged.pictureUrl, merged.bankName, merged.accountNumber, merged.accountName, merged.updatedAt]
+    );
+
+    return merged;
   },
 
-  getAllUsers() {
-    const db = readDb();
-    return Object.values(db.users);
+  async getAllUsers() {
+    await ready;
+    const res = await pool.query('SELECT * FROM users');
+    return res.rows.map(rowToUser);
   },
 
   // --- Bill Operations ---
-  getBill(billId) {
+  async getBill(billId) {
     if (!billId) return null;
-    const db = readDb();
-    return db.bills[billId] || null;
+    await ready;
+    const res = await pool.query('SELECT data FROM bills WHERE id = $1', [billId]);
+    return res.rows[0] ? res.rows[0].data : null;
   },
 
-  getActiveBill(groupId) {
+  async getActiveBill(groupId) {
     if (!groupId) return null;
-    const db = readDb();
-    return Object.values(db.bills).find(
-      bill => bill.groupId === groupId && bill.status !== 'closed'
-    ) || null;
+    await ready;
+    const res = await pool.query(
+      `SELECT data FROM bills WHERE group_id = $1 AND status != 'closed'
+       ORDER BY (data->>'createdAt')::bigint DESC LIMIT 1`,
+      [groupId]
+    );
+    return res.rows[0] ? res.rows[0].data : null;
   },
 
-  createBill(groupId, creatorId, title, type = 'equal') {
-    const db = readDb();
-    
+  async createBill(groupId, creatorId, title, type = 'equal') {
+    await ready;
+
     // Close any existing active bill in the same group first
-    Object.values(db.bills).forEach(bill => {
-      if (bill.groupId === groupId && bill.status !== 'closed') {
-        bill.status = 'closed';
-        bill.closedAt = Date.now();
-      }
-    });
+    await pool.query(
+      `UPDATE bills
+       SET status = 'closed',
+           data = jsonb_set(jsonb_set(data, '{status}', '"closed"'), '{closedAt}', to_jsonb($2::bigint))
+       WHERE group_id = $1 AND status != 'closed'`,
+      [groupId, Date.now()]
+    );
 
     const billId = 'bill_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
     const newBill = {
@@ -125,29 +133,49 @@ const database = {
       createdAt: Date.now()
     };
 
-    db.bills[billId] = newBill;
-    writeDb(db);
+    await pool.query(
+      'INSERT INTO bills (id, group_id, status, data) VALUES ($1, $2, $3, $4)',
+      [billId, groupId, 'collecting', JSON.stringify(newBill)]
+    );
+
     return newBill;
   },
 
-  updateBill(billId, updateFn) {
-    const db = readDb();
-    if (!db.bills[billId]) {
-      return null;
-    }
-    
-    const billCopy = JSON.parse(JSON.stringify(db.bills[billId]));
+  async updateBill(billId, updateFn) {
+    await ready;
+    const client = await pool.connect();
     try {
-      const updatedBill = updateFn(billCopy);
+      await client.query('BEGIN');
+      const res = await client.query('SELECT data FROM bills WHERE id = $1 FOR UPDATE', [billId]);
+      if (!res.rows[0]) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+
+      const billCopy = res.rows[0].data;
+      let updatedBill;
+      try {
+        updatedBill = updateFn(billCopy);
+      } catch (e) {
+        console.error(`Error updating bill ${billId}:`, e);
+        await client.query('ROLLBACK');
+        return billCopy;
+      }
+
       if (updatedBill) {
-        db.bills[billId] = updatedBill;
-        writeDb(db);
+        await client.query(
+          'UPDATE bills SET status = $2, data = $3 WHERE id = $1',
+          [billId, updatedBill.status, JSON.stringify(updatedBill)]
+        );
+        await client.query('COMMIT');
         return updatedBill;
       }
-    } catch (e) {
-      console.error(`Error updating bill ${billId}:`, e);
+
+      await client.query('ROLLBACK');
+      return billCopy;
+    } finally {
+      client.release();
     }
-    return db.bills[billId];
   }
 };
 

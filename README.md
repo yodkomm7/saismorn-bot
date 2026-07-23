@@ -29,7 +29,26 @@ cp .env.example .env
 PORT=3000
 LINE_CHANNEL_ACCESS_TOKEN=ใส่_Channel_Access_Token_ของคุณตรงนี้
 LINE_CHANNEL_SECRET=ใส่_Channel_Secret_ของคุณตรงนี้
+GEMINI_API_KEY=ใส่_Gemini_API_Key_ของคุณตรงนี้
+
+# Postgres connection string (จาก Neon)
+DATABASE_URL=ใส่ connection string จาก Neon ตรงนี้
 ```
+
+### ตั้งค่า Postgres Database (Neon)
+
+ระบบเก็บข้อมูลผู้ใช้/บิลทั้งหมดบน Postgres จริง (ไม่ใช่ไฟล์ local อีกต่อไป) แนะนำใช้ [Neon](https://neon.tech) เพราะมี free tier ที่ไม่ลบข้อมูลทิ้ง (แค่ auto-suspend ตอนไม่มีคนใช้ แล้ว resume เองในเสี้ยววินาทีตอนมี query เข้ามา):
+
+1. สมัครบัญชีที่ [neon.tech](https://neon.tech) (ฟรี ไม่ต้องผูกบัตรเครดิต)
+2. สร้าง Project ใหม่ (เลือก region ใกล้ๆ เช่น Singapore)
+3. ในหน้า Dashboard ของ Project กด **Connection string** แล้วคัดลอกมาใส่ในตัวแปร `DATABASE_URL` ของไฟล์ `.env`
+4. รันคำสั่งนี้ครั้งเดียวเพื่อสร้างตาราง + ย้ายข้อมูลเดิมจาก `db.json` (ถ้ามี) เข้า Postgres:
+   ```bash
+   node src/scratch/migrateToPostgres.js
+   ```
+5. รัน server ตามปกติ (`npm run dev`) — ตารางจะถูกสร้างอัตโนมัติถ้ายังไม่มีอยู่แล้ว
+
+> **หมายเหตุความปลอดภัย:** `DATABASE_URL` มี password ของฐานข้อมูลฝังอยู่ ต้องเก็บไว้ใน `.env` เท่านั้น (ห้าม commit เข้า git) — Neon เข้ารหัสการเชื่อมต่อด้วย TLS และมี authentication ในตัวอยู่แล้ว ต่างจาก cloud bin สาธารณะแบบเดิมที่ไม่มี auth ป้องกัน
 
 ### 3. รัน Server ในโหมดพัฒนา (Development Mode)
 คุณสามารถรัน Server ได้ผ่านคำสั่ง:

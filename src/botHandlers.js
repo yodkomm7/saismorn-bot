@@ -101,17 +101,17 @@ async function handleImageMessage(event) {
   }
 
   const profile = await line.getUserProfile(userId, groupId);
-  db.saveUser(userId, {
+  await db.saveUser(userId, {
     displayName: profile.displayName,
     pictureUrl: profile.pictureUrl
   });
 
-  let activeBill = db.getActiveBill(groupId);
+  let activeBill = await db.getActiveBill(groupId);
   if (!activeBill) {
-    activeBill = db.createBill(groupId, userId, scanResult.merchantName, 'multi');
+    activeBill = await db.createBill(groupId, userId, scanResult.merchantName, 'multi');
   }
 
-  const updatedBill = db.updateBill(activeBill.id, (b) => {
+  const updatedBill = await db.updateBill(activeBill.id, (b) => {
     if (!b.participants.some(p => p.userId === userId)) {
       b.participants.push({
         userId: userId,
@@ -193,7 +193,7 @@ async function handleTextMessage(event) {
         }
 
         const profile = await line.getUserProfile(userId, groupId);
-        const user = db.saveUser(userId, {
+        const user = await db.saveUser(userId, {
           displayName: profile.displayName,
           pictureUrl: profile.pictureUrl,
           bankName,
@@ -235,7 +235,7 @@ ${bankLabel}
 
   // 3. VIEW BANK ACCOUNTS / PROMPTPAY QR CODES
   if (/^(ดู\s*บัญชี|ดู\s*เลขบัญชี|ตรวจ\s*บัญชี|เช็ค\s*บัญชี|\/accounts)$/i.test(text)) {
-    const allUsers = db.getAllUsers();
+    const allUsers = await db.getAllUsers();
     const registeredUsers = allUsers.filter(u => u.bankName && u.accountNumber);
     
     if (registeredUsers.length === 0) {
@@ -273,7 +273,7 @@ ${bankLabel}
 
   // 4. VIEW LOGGED EXPENSE ITEMS IN ACTIVE BILL
   if (/^(ดู\s*รายการ|เช็ค\s*รายการ|รายการ|รายการ\s*ทั้งหมด)$/i.test(text)) {
-    const activeBill = db.getActiveBill(groupId);
+    const activeBill = await db.getActiveBill(groupId);
     if (!activeBill || !activeBill.payers || activeBill.payers.length === 0) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -297,7 +297,7 @@ ${bankLabel}
   if (deleteItemRegex.test(text)) {
     const itemIndex = parseInt(text.match(deleteItemRegex)[1]) - 1;
 
-    const activeBill = db.getActiveBill(groupId);
+    const activeBill = await db.getActiveBill(groupId);
     if (!activeBill || !activeBill.payers || activeBill.payers.length === 0) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -315,7 +315,7 @@ ${bankLabel}
     let deletedItemName = '';
     let deletedAmount = 0;
 
-    const updatedBill = db.updateBill(activeBill.id, (b) => {
+    const updatedBill = await db.updateBill(activeBill.id, (b) => {
       const removed = b.payers.splice(itemIndex, 1)[0];
       if (removed) {
         deletedItemName = removed.itemName;
@@ -338,7 +338,7 @@ ${bankLabel}
 
   // 6. JOIN BILL COMMAND
   if (/^(เข้าร่วม|ร่วมหาร|ร่วมปาร์ตี้)$/i.test(text)) {
-    const activeBill = db.getActiveBill(groupId);
+    const activeBill = await db.getActiveBill(groupId);
     if (!activeBill) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -354,12 +354,12 @@ ${bankLabel}
     }
 
     const profile = await line.getUserProfile(userId, groupId);
-    db.saveUser(userId, {
+    await db.saveUser(userId, {
       displayName: profile.displayName,
       pictureUrl: profile.pictureUrl
     });
 
-    const updatedBill = db.updateBill(activeBill.id, (b) => {
+    const updatedBill = await db.updateBill(activeBill.id, (b) => {
       if (!b.participants.some(p => p.userId === userId)) {
         b.participants.push({
           userId: userId,
@@ -398,13 +398,13 @@ ${names}
     const title = match[1] || 'ปาร์ตี้หารค่าใช้จ่าย';
 
     const profile = await line.getUserProfile(userId, groupId);
-    db.saveUser(userId, {
+    await db.saveUser(userId, {
       displayName: profile.displayName,
       pictureUrl: profile.pictureUrl
     });
 
-    const bill = db.createBill(groupId, userId, title, 'multi');
-    const updatedBill = db.updateBill(bill.id, (b) => {
+    const bill = await db.createBill(groupId, userId, title, 'multi');
+    const updatedBill = await db.updateBill(bill.id, (b) => {
       b.participants.push({
         userId: userId,
         displayName: profile.displayName,
@@ -452,17 +452,17 @@ ${names}
 
   if (payAmount > 0) {
     const profile = await line.getUserProfile(userId, groupId);
-    db.saveUser(userId, {
+    await db.saveUser(userId, {
       displayName: profile.displayName,
       pictureUrl: profile.pictureUrl
     });
 
-    let activeBill = db.getActiveBill(groupId);
+    let activeBill = await db.getActiveBill(groupId);
     if (!activeBill) {
-      activeBill = db.createBill(groupId, userId, payItemName, 'multi');
+      activeBill = await db.createBill(groupId, userId, payItemName, 'multi');
     }
 
-    const updatedBill = db.updateBill(activeBill.id, (b) => {
+    const updatedBill = await db.updateBill(activeBill.id, (b) => {
       if (!b.participants.some(p => p.userId === userId)) {
         b.participants.push({
           userId: userId,
@@ -504,7 +504,7 @@ ${names}
 
   // 9. SETTLE / CALCULATE BILL COMMAND (With Automatic PromptPay QR Images)
   if (/^(สรุปยอด|คำนวณ|คิดเงิน|สรุปบิล)$/i.test(text)) {
-    const activeBill = db.getActiveBill(groupId);
+    const activeBill = await db.getActiveBill(groupId);
     if (!activeBill) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -512,7 +512,7 @@ ${names}
       });
     }
 
-    const updatedBill = calculateSettlement(activeBill.id);
+    const updatedBill = await calculateSettlement(activeBill.id);
     if (!updatedBill) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -553,22 +553,23 @@ ${names}
       replyMsgText += `🎉 สมาชิกทุกท่านจ่ายเงินเท่ากันพอดี ไม่ต้องโอนคืนกันค่ะ`;
       messages.push({ type: 'text', text: replyMsgText });
     } else {
-      updatedBill.transfers.forEach((t, index) => {
-        const receiver = db.getUser(t.toUserId);
+      for (let index = 0; index < updatedBill.transfers.length; index++) {
+        const t = updatedBill.transfers[index];
+        const receiver = await db.getUser(t.toUserId);
         let bankText = 'ยังไม่ได้บันทึกบัญชีในระบบค่ะ';
         if (receiver && receiver.bankName && receiver.accountNumber) {
           bankText = `${getBankLabel(receiver.bankName)}\n   เลข/เบอร์: ${receiver.accountNumber}\n   ชื่อบัญชี: ${receiver.accountName || receiver.displayName}`;
         }
 
         replyMsgText += `${index + 1}. ${t.fromName} ➡️ โอนให้ ${t.toName}\n   💵 ยอดโอนสุทธิ: ${t.amount.toLocaleString('th-TH')} บาท\n   ${bankText}\n\n`;
-      });
+      }
 
       replyMsgText += `👉 โอนเงินเรียบร้อยแล้วพิมพ์ "ปิดบิล" เพื่อจบรายการนะคะ 😊`;
       messages.push({ type: 'text', text: replyMsgText });
 
       // Generate dynamic PromptPay QR code images with embedded transfer amounts
-      updatedBill.transfers.slice(0, 4).forEach(t => {
-        const receiver = db.getUser(t.toUserId);
+      for (const t of updatedBill.transfers.slice(0, 4)) {
+        const receiver = await db.getUser(t.toUserId);
         if (receiver && receiver.accountNumber) {
           const qrUrl = getPromptPayQrUrl(receiver.accountNumber, t.amount);
           if (qrUrl) {
@@ -579,7 +580,7 @@ ${names}
             });
           }
         }
-      });
+      }
     }
 
     return line.replyMessage(replyToken, messages);
@@ -587,7 +588,7 @@ ${names}
 
   // 10. CLOSE BILL / CANCEL BILL
   if (/^(ปิดบิล|เคลียร์แล้ว)$/i.test(text)) {
-    const activeBill = db.getActiveBill(groupId);
+    const activeBill = await db.getActiveBill(groupId);
     if (!activeBill) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -595,7 +596,7 @@ ${names}
       });
     }
 
-    db.updateBill(activeBill.id, (b) => {
+    await db.updateBill(activeBill.id, (b) => {
       b.status = 'closed';
       b.closedAt = Date.now();
       return b;
@@ -608,7 +609,7 @@ ${names}
   }
 
   if (/^(ยกเลิกปาร์ตี้|ยกเลิกบิล|ยกเลิกหาร)$/i.test(text)) {
-    const activeBill = db.getActiveBill(groupId);
+    const activeBill = await db.getActiveBill(groupId);
     if (!activeBill) {
       return line.replyMessage(replyToken, {
         type: 'text',
@@ -616,7 +617,7 @@ ${names}
       });
     }
 
-    db.updateBill(activeBill.id, (b) => {
+    await db.updateBill(activeBill.id, (b) => {
       b.status = 'closed';
       b.cancelledAt = Date.now();
       return b;
@@ -641,7 +642,7 @@ async function handlePostback(event) {
 /**
  * Settlement Engine (Multi-Payer Net Balance Calculation & Transaction Minimization)
  */
-function calculateSettlement(billId) {
+async function calculateSettlement(billId) {
   return db.updateBill(billId, (b) => {
     b.status = 'settling';
     b.settledAt = Date.now();
