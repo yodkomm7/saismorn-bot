@@ -53,6 +53,95 @@ function getCategoryEmoji(category) {
   return map[category] || '📦';
 }
 
+const SUPPORTED_FOREIGN_CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'SGD', 'MYR', 'CNY', 'KRW', 'VND', 'LAK', 'KHR', 'AUD', 'HKD', 'TWD', 'IDR', 'PHP'];
+
+/**
+ * Detect a currency code as the first token of free text (e.g. "JPY ค่าอาหาร"),
+ * returning the remaining text as the item name.
+ */
+function extractCurrency(rest = '') {
+  const trimmed = (rest || '').trim();
+  if (!trimmed) return { currency: 'THB', itemName: '' };
+  const parts = trimmed.split(/\s+/);
+  const maybeCurrency = parts[0].toUpperCase();
+  if (SUPPORTED_FOREIGN_CURRENCIES.includes(maybeCurrency)) {
+    return { currency: maybeCurrency, itemName: parts.slice(1).join(' ') };
+  }
+  return { currency: 'THB', itemName: trimmed };
+}
+
+/**
+ * Split a bill's payer entries into a THB subtotal and per-currency foreign
+ * subtotals, for previews shown before settlement (before conversion happens).
+ */
+function summarizePayers(payers = []) {
+  let thbTotal = 0;
+  const foreignTotals = {};
+  payers.forEach(p => {
+    const currency = p.currency || 'THB';
+    if (currency === 'THB') {
+      thbTotal += p.amountPaid;
+    } else {
+      foreignTotals[currency] = (foreignTotals[currency] || 0) + p.amountPaid;
+    }
+  });
+  return { thbTotal, foreignTotals };
+}
+
+function formatForeignNote(foreignTotals) {
+  const entries = Object.entries(foreignTotals);
+  if (entries.length === 0) return '';
+  const list = entries.map(([currency, amount]) => `${amount.toLocaleString('th-TH')} ${currency}`).join(', ');
+  return `\n💱 มีรายการสกุลเงินอื่นที่ยังไม่แปลง: ${list} (จะให้ระบุเรทแลกเปลี่ยนตอนพิมพ์ "สรุปยอด")`;
+}
+
+/**
+ * THB-equivalent amount for a payer entry, applying the bill's confirmed
+ * exchange rate (set via "เรท [CUR] [RATE]") or skipping conversion if opted out.
+ */
+function getThbAmount(payer, bill) {
+  const currency = payer.currency || 'THB';
+  if (currency === 'THB') return payer.amountPaid;
+  if (bill && bill.skipCurrencyConversion) return payer.amountPaid;
+  const rate = bill && bill.exchangeRates ? bill.exchangeRates[currency] : null;
+  return rate ? Math.round(payer.amountPaid * rate * 100) / 100 : payer.amountPaid;
+}
+
+function getForeignCurrencyTotals(bill) {
+  const totals = {};
+  (bill.payers || []).forEach(p => {
+    const currency = p.currency || 'THB';
+    if (currency !== 'THB') {
+      totals[currency] = (totals[currency] || 0) + p.amountPaid;
+    }
+  });
+  return totals;
+}
+
+function getMissingExchangeRates(bill) {
+  const totals = getForeignCurrencyTotals(bill);
+  const rates = bill.exchangeRates || {};
+  return Object.keys(totals).filter(currency => !(currency in rates));
+}
+
+/**
+ * Builds the "please provide an exchange rate" prompt for a bill, or null if
+ * every foreign currency present already has a rate (or conversion was skipped).
+ */
+function buildMissingRatePrompt(bill) {
+  if (bill.skipCurrencyConversion) return null;
+  const missingCurrencies = getMissingExchangeRates(bill);
+  if (missingCurrencies.length === 0) return null;
+
+  const foreignTotals = getForeignCurrencyTotals(bill);
+  let text = `บิลนี้มีรายการที่ใช้สกุลเงินอื่นค่ะ ก่อนสรุปยอด รบกวนระบุอัตราแลกเปลี่ยนเป็นบาทก่อนนะคะ:\n\n`;
+  missingCurrencies.forEach(currency => {
+    text += `💱 ${currency}: รวม ${foreignTotals[currency].toLocaleString('th-TH')} ${currency}\n   👉 พิมพ์ เช่น "เรท ${currency} 0.24" (หมายถึง 1 ${currency} = 0.24 บาท)\n\n`;
+  });
+  text += `หรือพิมพ์ "ไม่แปลงสกุลเงิน" เพื่อข้ามขั้นตอนนี้ (จะนับตัวเลขเดิมโดยไม่แปลงอัตราแลกเปลี่ยน)`;
+  return text;
+}
+
 /**
  * Build a Flex Message bubble showing the QR code together with the
  * recipient's name (and amount, if any) so the image is self-explanatory
@@ -218,8 +307,8 @@ async function handleImageMessage(event) {
   });
 
   const names = updatedBill.participants.map((p, i) => `${i + 1}. ${p.displayName}`).join('\n');
-  let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
-  const splitAmount = Math.round((total / updatedBill.participants.length) * 100) / 100;
+  const { thbTotal, foreignTotals } = summarizePayers(updatedBill.payers);
+  const splitAmount = Math.round((thbTotal / updatedBill.participants.length) * 100) / 100;
   const lastCategory = updatedBill.payers[updatedBill.payers.length - 1].category;
 
   const replyMsg = `✨ น้องส้มอ่านสลิป/ใบเสร็จเรียบร้อยค่ะ 🧾
@@ -228,12 +317,12 @@ async function handleImageMessage(event) {
 🏪 รายการ: ${scanResult.merchantName} (${scanResult.totalAmount.toLocaleString('th-TH')} บาท)
 ${getCategoryEmoji(lastCategory)} หมวดหมู่: ${lastCategory}
 
-💵 ยอดรวมสะสมมื้อนี้: ${total.toLocaleString('th-TH')} บาท
+💵 ยอดรวมสะสมมื้อนี้ (บาท): ${thbTotal.toLocaleString('th-TH')} บาท${formatForeignNote(foreignTotals)}
 
 👥 สมาชิกที่เข้าร่วม (${updatedBill.participants.length} คน):
 ${names}
 
-💰 ตกคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
+💰 ตกคนละประมาณ (บาท): ${splitAmount.toLocaleString('th-TH')} บาท
 
 👉 พิมพ์ "ดูรายการ" เพื่อดูสเปกรายการทั้งหมด
 👉 สมาชิกพิมพ์ "เข้าร่วม" เพื่อเข้าหาร
@@ -371,11 +460,15 @@ ${bankLabel}
     let itemListText = `📝 รายการค่าใช้จ่ายทั้งหมดในบิลนี้ (${activeBill.title}):\n\n`;
     activeBill.payers.forEach((item, index) => {
       const category = item.category || categorizeExpense(item.itemName);
-      itemListText += `${index + 1}. ${getCategoryEmoji(category)} [${category}] ${item.itemName} - ${item.amountPaid.toLocaleString('th-TH')} บาท (จ่ายโดย: ${item.displayName})\n`;
+      const currency = item.currency || 'THB';
+      const amountLabel = currency === 'THB'
+        ? `${item.amountPaid.toLocaleString('th-TH')} บาท`
+        : `${item.amountPaid.toLocaleString('th-TH')} ${currency}`;
+      itemListText += `${index + 1}. ${getCategoryEmoji(category)} [${category}] ${item.itemName} - ${amountLabel} (จ่ายโดย: ${item.displayName})\n`;
     });
 
-    let total = activeBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
-    itemListText += `\n💵 ยอดรวมสะสมขณะนี้: ${total.toLocaleString('th-TH')} บาท\n\n👉 หากต้องการลบรายการที่ใส่ผิด ให้พิมพ์: "ลบรายการ [ลำดับ]" (เช่น ลบรายการ 2)`;
+    const { thbTotal, foreignTotals } = summarizePayers(activeBill.payers);
+    itemListText += `\n💵 ยอดรวมสะสมขณะนี้ (บาท): ${thbTotal.toLocaleString('th-TH')} บาท${formatForeignNote(foreignTotals)}\n\n👉 หากต้องการลบรายการที่ใส่ผิด ให้พิมพ์: "ลบรายการ [ลำดับ]" (เช่น ลบรายการ 2)`;
 
     return line.replyMessage(replyToken, { type: 'text', text: itemListText });
   }
@@ -402,21 +495,26 @@ ${bankLabel}
 
     let deletedItemName = '';
     let deletedAmount = 0;
+    let deletedCurrency = 'THB';
 
     const updatedBill = await db.updateBill(activeBill.id, (b) => {
       const removed = b.payers.splice(itemIndex, 1)[0];
       if (removed) {
         deletedItemName = removed.itemName;
         deletedAmount = removed.amountPaid;
+        deletedCurrency = removed.currency || 'THB';
       }
       return b;
     });
 
-    let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
+    const { thbTotal, foreignTotals } = summarizePayers(updatedBill.payers);
+    const deletedAmountLabel = deletedCurrency === 'THB'
+      ? `${deletedAmount.toLocaleString('th-TH')} บาท`
+      : `${deletedAmount.toLocaleString('th-TH')} ${deletedCurrency}`;
 
-    const replyMsg = `❌ ลบรายการที่ ${itemIndex + 1} (${deletedItemName} ${deletedAmount.toLocaleString('th-TH')} บาท) เรียบร้อยค่ะ!
+    const replyMsg = `❌ ลบรายการที่ ${itemIndex + 1} (${deletedItemName} ${deletedAmountLabel}) เรียบร้อยค่ะ!
 
-💵 ยอดรวมสะสมอัปเดตเป็น: ${total.toLocaleString('th-TH')} บาท
+💵 ยอดรวมสะสมอัปเดตเป็น (บาท): ${thbTotal.toLocaleString('th-TH')} บาท${formatForeignNote(foreignTotals)}
 
 👉 พิมพ์ "ดูรายการ" เพื่อเช็ครายการทั้งหมด
 👉 พิมพ์ "สรุปยอด" เมื่อลงครบเรียบร้อยนะคะ 😊`;
@@ -460,18 +558,18 @@ ${bankLabel}
     });
 
     const names = updatedBill.participants.map((p, i) => `${i + 1}. ${p.displayName}`).join('\n');
-    let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
-    const splitAmount = Math.round((total / updatedBill.participants.length) * 100) / 100;
+    const { thbTotal, foreignTotals } = summarizePayers(updatedBill.payers);
+    const splitAmount = Math.round((thbTotal / updatedBill.participants.length) * 100) / 100;
 
     const replyMsg = `🙋‍♂️ ${profile.displayName} เข้าร่วมหารแล้วค่ะ!
 
 ปาร์ตี้/มื้ออาหาร: ${updatedBill.title}
-ยอดรวมสะสม: ${total.toLocaleString('th-TH')} บาท
+ยอดรวมสะสม (บาท): ${thbTotal.toLocaleString('th-TH')} บาท${formatForeignNote(foreignTotals)}
 
 👥 สมาชิกที่เข้าร่วม (${updatedBill.participants.length} คน):
 ${names}
 
-💰 เฉลี่ยคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
+💰 เฉลี่ยคนละประมาณ (บาท): ${splitAmount.toLocaleString('th-TH')} บาท
 
 👉 พิมพ์ "เข้าร่วม" เพิ่มได้ค่ะ
 👉 เมื่อลงรายการครบแล้ว พิมพ์ "สรุปยอด" ได้เลยนะคะ 😊`;
@@ -516,26 +614,91 @@ ${names}
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
   }
 
-  // 8. RECORD EXPENSE COMMAND
+  // 7b. SET EXCHANGE RATE FOR A FOREIGN CURRENCY (e.g. "เรท JPY 0.24")
+  // Must be checked before the record-expense catch-all regex below, which
+  // would otherwise misparse "เรท JPY 0.24" as an expense named "เรท JPY".
+  const setRateRegex = /^(?:เรท|rate)\s+([A-Za-z]{3})\s+(\d+(?:\.\d+)?)$/i;
+  if (setRateRegex.test(text)) {
+    const match = text.match(setRateRegex);
+    const currency = match[1].toUpperCase();
+    const rate = parseFloat(match[2]);
+
+    const activeBill = await db.getActiveBill(groupId);
+    if (!activeBill) {
+      return line.replyMessage(replyToken, {
+        type: 'text',
+        text: 'ไม่มีบิลที่เปิดอยู่ขณะนี้ค่ะ 😊'
+      });
+    }
+
+    const updatedBill = await db.updateBill(activeBill.id, (b) => {
+      b.exchangeRates = b.exchangeRates || {};
+      b.exchangeRates[currency] = rate;
+      return b;
+    });
+
+    const stillMissing = getMissingExchangeRates(updatedBill);
+    if (stillMissing.length > 0) {
+      return line.replyMessage(replyToken, {
+        type: 'text',
+        text: `✅ บันทึกเรท 1 ${currency} = ${rate} บาท เรียบร้อยค่ะ\n\n👉 ยังต้องระบุเรทของ: ${stillMissing.join(', ')}\nพิมพ์ เช่น: "เรท ${stillMissing[0]} 0.24"`
+      });
+    }
+
+    return line.replyMessage(replyToken, {
+      type: 'text',
+      text: `✅ บันทึกเรท 1 ${currency} = ${rate} บาท เรียบร้อยค่ะ ครบทุกสกุลเงินแล้ว!\n\n👉 พิมพ์ "สรุปยอด" อีกครั้งเพื่อดำเนินการต่อได้เลยค่ะ`
+    });
+  }
+
+  // 7c. SKIP CURRENCY CONVERSION FOR THIS BILL
+  if (/^(ไม่แปลงสกุลเงิน|ข้ามแปลงสกุลเงิน|ไม่แปลงค่าเงิน)$/i.test(text)) {
+    const activeBill = await db.getActiveBill(groupId);
+    if (!activeBill) {
+      return line.replyMessage(replyToken, {
+        type: 'text',
+        text: 'ไม่มีบิลที่เปิดอยู่ขณะนี้ค่ะ 😊'
+      });
+    }
+
+    await db.updateBill(activeBill.id, (b) => {
+      b.skipCurrencyConversion = true;
+      return b;
+    });
+
+    return line.replyMessage(replyToken, {
+      type: 'text',
+      text: `⚠️ ข้ามการแปลงสกุลเงินแล้วค่ะ รายการสกุลอื่นจะถูกนับตามตัวเลขเดิมโดยไม่แปลงอัตราแลกเปลี่ยน (อาจไม่ตรงกับยอดจริง)\n\n👉 พิมพ์ "สรุปยอด" อีกครั้งเพื่อดำเนินการต่อได้เลยค่ะ`
+    });
+  }
+
+  // 8. RECORD EXPENSE COMMAND (optionally tagged with a foreign currency code, e.g. "จ่าย 500 JPY ค่าอาหาร")
   const payPrefixRegex = /^(?:จ่าย|ออกค่า)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
   const addPrefixRegex = /^(?:บวก|เพิ่ม|บวกเพิ่ม)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/i;
-  const addSuffixRegex = /^(.+)\s+(\d+(?:\.\d+)?)$/i;
+  const CURRENCY_ALTERNATION = SUPPORTED_FOREIGN_CURRENCIES.join('|');
+  const addSuffixRegex = new RegExp(`^(.+?)\\s+(\\d+(?:\\.\\d+)?)(?:\\s+(${CURRENCY_ALTERNATION}))?$`, 'i');
 
   let payAmount = 0;
   let payItemName = '';
+  let payCurrency = 'THB';
 
   if (payPrefixRegex.test(text)) {
     const match = text.match(payPrefixRegex);
     payAmount = parseFloat(match[1]);
-    payItemName = match[2] || 'ค่าใช้จ่ายทั่วไป';
+    const parsed = extractCurrency(match[2]);
+    payCurrency = parsed.currency;
+    payItemName = parsed.itemName || 'ค่าใช้จ่ายทั่วไป';
   } else if (addPrefixRegex.test(text)) {
     const match = text.match(addPrefixRegex);
     payAmount = parseFloat(match[1]);
-    payItemName = match[2] || 'รายการเพิ่มเติม';
+    const parsed = extractCurrency(match[2]);
+    payCurrency = parsed.currency;
+    payItemName = parsed.itemName || 'รายการเพิ่มเติม';
   } else if (addSuffixRegex.test(text)) {
     const match = text.match(addSuffixRegex);
     payItemName = match[1].trim();
     payAmount = parseFloat(match[2]);
+    payCurrency = match[3] ? match[3].toUpperCase() : 'THB';
   }
 
   if (payAmount > 0) {
@@ -564,6 +727,7 @@ ${names}
         userId: userId,
         displayName: profile.displayName,
         amountPaid: payAmount,
+        currency: payCurrency,
         itemName: payItemName,
         category: category,
         timestamp: Date.now()
@@ -572,21 +736,25 @@ ${names}
     });
 
     const names = updatedBill.participants.map((p, i) => `${i + 1}. ${p.displayName}`).join('\n');
-    let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
-    const splitAmount = Math.round((total / updatedBill.participants.length) * 100) / 100;
-    const lastCategory = updatedBill.payers[updatedBill.payers.length - 1].category;
+    const { thbTotal, foreignTotals } = summarizePayers(updatedBill.payers);
+    const splitAmount = Math.round((thbTotal / updatedBill.participants.length) * 100) / 100;
+    const lastEntry = updatedBill.payers[updatedBill.payers.length - 1];
+    const lastCategory = lastEntry.category;
+    const amountLabel = payCurrency === 'THB'
+      ? `${payAmount.toLocaleString('th-TH')} บาท`
+      : `${payAmount.toLocaleString('th-TH')} ${payCurrency}`;
 
     const replyMsg = `✨ บันทึกรายจ่ายเพิ่มเติมเรียบร้อยค่ะ! 📝
 
 👤 ผู้ชำระ: ${profile.displayName}
-➕ เพิ่มรายการ: ${payItemName} (${payAmount.toLocaleString('th-TH')} บาท)
+➕ เพิ่มรายการ: ${payItemName} (${amountLabel})
 ${getCategoryEmoji(lastCategory)} หมวดหมู่: ${lastCategory}
-💵 ยอดรวมสะสมมื้อนี้: ${total.toLocaleString('th-TH')} บาท
+💵 ยอดรวมสะสมมื้อนี้ (บาท): ${thbTotal.toLocaleString('th-TH')} บาท${formatForeignNote(foreignTotals)}
 
 👥 สมาชิกที่เข้าร่วม (${updatedBill.participants.length} คน):
 ${names}
 
-💰 ตกคนละประมาณ: ${splitAmount.toLocaleString('th-TH')} บาท
+💰 ตกคนละประมาณ (บาท): ${splitAmount.toLocaleString('th-TH')} บาท
 
 👉 หากใส่ผิดพิมพ์ "ลบรายการ [ลำดับ]" เพื่อยกเลิกได้ค่ะ
 👉 เมื่อลงรายการครบแล้วพิมพ์ "สรุปยอด" ได้เลยนะคะ 😊`;
@@ -606,6 +774,11 @@ ${names}
         type: 'text',
         text: 'ยังไม่มีปาร์ตี้หรือบิลที่เปิดอยู่ขณะนี้ค่ะ 😊'
       });
+    }
+
+    const missingRatePrompt = buildMissingRatePrompt(activeBill);
+    if (missingRatePrompt) {
+      return line.replyMessage(replyToken, { type: 'text', text: missingRatePrompt });
     }
 
     return line.replyMessage(replyToken, {
@@ -628,6 +801,11 @@ ${names}
       });
     }
 
+    const missingRatePrompt = buildMissingRatePrompt(activeBill);
+    if (missingRatePrompt) {
+      return line.replyMessage(replyToken, { type: 'text', text: missingRatePrompt });
+    }
+
     const updatedBill = await calculateSettlement(activeBill.id);
     if (!updatedBill) {
       return line.replyMessage(replyToken, {
@@ -647,11 +825,20 @@ ${names}
 เฉลี่ยคนละ (${numParticipants} คน): ${Math.round(splitAmount * 100) / 100} บาท
 `;
 
+    if (updatedBill.exchangeRates && Object.keys(updatedBill.exchangeRates).length > 0) {
+      replyMsgText += `\n💱 อัตราแลกเปลี่ยนที่ใช้:\n`;
+      Object.entries(updatedBill.exchangeRates).forEach(([currency, rate]) => {
+        replyMsgText += `1 ${currency} = ${rate} บาท\n`;
+      });
+    } else if (updatedBill.skipCurrencyConversion) {
+      replyMsgText += `\n⚠️ ข้ามการแปลงสกุลเงิน (นับตัวเลขเดิมโดยไม่แปลงอัตรา)\n`;
+    }
+
     if (showCategoryBreakdown) {
       const categoryTotals = {};
       (updatedBill.payers || []).forEach(p => {
         const category = p.category || categorizeExpense(p.itemName);
-        categoryTotals[category] = (categoryTotals[category] || 0) + p.amountPaid;
+        categoryTotals[category] = (categoryTotals[category] || 0) + getThbAmount(p, updatedBill);
       });
 
       replyMsgText += `\n🗂️ สรุปค่าใช้จ่ายแยกหมวดหมู่:\n`;
@@ -783,7 +970,7 @@ async function calculateSettlement(billId) {
       return b;
     }
 
-    const totalExpense = (b.payers || []).reduce((sum, p) => sum + p.amountPaid, 0);
+    const totalExpense = (b.payers || []).reduce((sum, p) => sum + getThbAmount(p, b), 0);
     b.totalAmount = totalExpense;
 
     const sharePerPerson = Math.round((totalExpense / numParticipants) * 100) / 100;
@@ -791,7 +978,7 @@ async function calculateSettlement(billId) {
     const participantBalances = b.participants.map(p => {
       const totalPaidByUser = (b.payers || [])
         .filter(pr => pr.userId === p.userId)
-        .reduce((sum, pr) => sum + pr.amountPaid, 0);
+        .reduce((sum, pr) => sum + getThbAmount(pr, b), 0);
       
       p.share = sharePerPerson;
       
@@ -861,12 +1048,14 @@ function sendHelpMessage(replyToken) {
 
 3. ลงรายการค่าอาหาร/ค่าใช้จ่าย (น้องส้มแยกหมวดหมู่ให้อัตโนมัติ: อาหาร/ที่พัก/เดินทาง/อื่นๆ)
 👉 พิมพ์: "ค่าขนม 200" หรือ "จ่าย 800 ค่าเค้ก"
+👉 ใช้สกุลเงินต่างประเทศได้: "จ่าย 500 JPY ค่าอาหาร"
 
 4. ดูและลบรายการที่พิมพ์ผิด
 👉 พิมพ์: "ดูรายการ" หรือ "ลบรายการ 2"
 
 5. คิดเงินสรุปยอด (สร้างรูป QR พร้อมระบุยอดโอนให้อัตโนมัติ)
-👉 พิมพ์: "สรุปยอด" (น้องส้มจะถามว่าจะให้แยกหมวดหรือรวมทั้งทริป)`;
+👉 พิมพ์: "สรุปยอด" (ถ้ามีสกุลเงินอื่นจะถามเรทแลกเปลี่ยนก่อน แล้วถามว่าจะให้แยกหมวดหรือรวมทั้งทริป)
+👉 ตั้งเรทแลกเปลี่ยน: "เรท JPY 0.24" (หมายถึง 1 JPY = 0.24 บาท)`;
 
   return line.replyMessage(replyToken, {
     type: 'text',
