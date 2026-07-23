@@ -279,6 +279,7 @@ async function handleImageMessage(event) {
     displayName: profile.displayName,
     pictureUrl: profile.pictureUrl
   });
+  await db.addGroupMember(groupId, userId);
 
   let activeBill = await db.getActiveBill(groupId);
   if (!activeBill) {
@@ -378,6 +379,7 @@ async function handleTextMessage(event) {
           accountNumber,
           accountName
         });
+        await db.addGroupMember(groupId, userId);
 
         const bankLabel = getBankLabel(user.bankName);
 
@@ -419,10 +421,10 @@ ${bankLabel}
     });
   }
 
-  // 3. VIEW BANK ACCOUNTS / PROMPTPAY QR CODES
+  // 3. VIEW BANK ACCOUNTS / PROMPTPAY QR CODES (scoped to this group only)
   if (/^(ดู\s*บัญชี|ดู\s*เลขบัญชี|ตรวจ\s*บัญชี|เช็ค\s*บัญชี|\/accounts)$/i.test(text)) {
-    const allUsers = await db.getAllUsers();
-    const registeredUsers = allUsers.filter(u => u.bankName && u.accountNumber);
+    const groupUsers = await db.getUsersInGroup(groupId);
+    const registeredUsers = groupUsers.filter(u => u.bankName && u.accountNumber);
     
     if (registeredUsers.length === 0) {
       return line.replyMessage(replyToken, {
@@ -539,6 +541,7 @@ ${bankLabel}
       displayName: profile.displayName,
       pictureUrl: profile.pictureUrl
     });
+    await db.addGroupMember(groupId, userId);
 
     const updatedBill = await db.updateBill(activeBill.id, (b) => {
       if (!b.participants.some(p => p.userId === userId)) {
@@ -583,6 +586,7 @@ ${names}
       displayName: profile.displayName,
       pictureUrl: profile.pictureUrl
     });
+    await db.addGroupMember(groupId, userId);
 
     const bill = await db.createBill(groupId, userId, title, 'multi');
     const updatedBill = await db.updateBill(bill.id, (b) => {
@@ -702,6 +706,7 @@ ${names}
       displayName: profile.displayName,
       pictureUrl: profile.pictureUrl
     });
+    await db.addGroupMember(groupId, userId);
 
     let activeBill = await db.getActiveBill(groupId);
     if (!activeBill) {

@@ -26,6 +26,13 @@ async function initDb() {
     );
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_bills_group_status ON bills (group_id, status);`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS group_members (
+      group_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      PRIMARY KEY (group_id, user_id)
+    );
+  `);
 }
 
 const ready = initDb().catch(err => {
@@ -85,6 +92,29 @@ const database = {
   async getAllUsers() {
     await ready;
     const res = await pool.query('SELECT * FROM users');
+    return res.rows.map(rowToUser);
+  },
+
+  // --- Group Membership (keeps per-group data, like "ดูบัญชี", scoped correctly
+  // when the bot is used across multiple LINE groups) ---
+  async addGroupMember(groupId, userId) {
+    if (!groupId || !userId) return;
+    await ready;
+    await pool.query(
+      `INSERT INTO group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [groupId, userId]
+    );
+  },
+
+  async getUsersInGroup(groupId) {
+    if (!groupId) return [];
+    await ready;
+    const res = await pool.query(
+      `SELECT u.* FROM users u
+       INNER JOIN group_members gm ON gm.user_id = u.id
+       WHERE gm.group_id = $1`,
+      [groupId]
+    );
     return res.rows.map(rowToUser);
   },
 
