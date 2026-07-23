@@ -48,6 +48,16 @@ function categorizeExpense(itemName = '') {
   return 'ค่าอื่นๆ';
 }
 
+/**
+ * Detect Thai internet laughter written as digits (e.g. "555", "5555"),
+ * since "5" is pronounced "ha" in Thai. Used to stop the freeform
+ * "[item] [number]" expense-logging pattern from misreading a laugh as
+ * an amount (e.g. "ตลกมาก 5555" being parsed as a 5,555 baht expense).
+ */
+function looksLikeThaiLaughter(numStr = '') {
+  return /^5{3,}$/.test(numStr.trim());
+}
+
 function getCategoryEmoji(category) {
   const map = { 'ค่าอาหาร': '🍽️', 'ค่าที่พัก': '🏨', 'ค่าเดินทาง': '🚗', 'ค่าอื่นๆ': '📦' };
   return map[category] || '📦';
@@ -695,9 +705,13 @@ ${names}
     payItemName = parsed.itemName || 'รายการเพิ่มเติม';
   } else if (addSuffixRegex.test(text)) {
     const match = text.match(addSuffixRegex);
-    payItemName = match[1].trim();
-    payAmount = parseFloat(match[2]);
-    payCurrency = match[3] ? match[3].toUpperCase() : 'THB';
+    // Only auto-detect an amount here when there's no explicit "จ่าย"/"บวก" command,
+    // so skip trailing digits that are actually Thai laughter (e.g. "ตลกมาก 5555").
+    if (!looksLikeThaiLaughter(match[2])) {
+      payItemName = match[1].trim();
+      payAmount = parseFloat(match[2]);
+      payCurrency = match[3] ? match[3].toUpperCase() : 'THB';
+    }
   }
 
   if (payAmount > 0) {
