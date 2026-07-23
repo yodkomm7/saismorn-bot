@@ -33,6 +33,27 @@ function getPromptPayQrUrl(accountNumber = '', amount = 0) {
 }
 
 /**
+ * Categorize an expense item by keyword-matching its name (Thai/English)
+ */
+function categorizeExpense(itemName = '') {
+  const name = itemName.toLowerCase();
+
+  const foodKeywords = ['อาหาร', 'ข้าว', 'กับข้าว', 'ชาบู', 'หมูกระทะ', 'บุฟเฟ่ต์', 'บุฟเฟต์', 'เครื่องดื่ม', 'กาแฟ', 'ขนม', 'ของกิน', 'มื้อเช้า', 'มื้อเที่ยง', 'มื้อเย็น', 'อาหารเช้า', 'อาหารเที่ยง', 'อาหารเย็น', 'delivery', 'เดลิเวอรี่', 'ร้านอาหาร', 'ก๋วยเตี๋ยว', 'ปิ้งย่าง', 'สุกี้', 'ของหวาน', 'เบเกอรี่', 'ชานม', 'บิงซู', 'ร้านกาแฟ', 'คาเฟ่', 'บุฟเฟต'];
+  const stayKeywords = ['โรงแรม', 'ที่พัก', 'รีสอร์ท', 'hotel', 'resort', 'โฮสเทล', 'hostel', 'ห้องพัก', 'บ้านพัก', 'คอนโด', 'homestay', 'โฮมสเตย์', 'แคมป์ปิ้ง'];
+  const transportKeywords = ['รถ', 'แท็กซี่', 'taxi', 'grab', 'ตั๋ว', 'เครื่องบิน', 'น้ำมัน', 'ทางด่วน', 'รถเช่า', 'เรือ', 'รถทัวร์', 'รถไฟ', 'ค่าโดยสาร', 'วินมอเตอร์ไซค์', 'มอเตอร์ไซค์รับจ้าง', 'bts', 'mrt', 'ทางพิเศษ', 'ค่าเดินทาง', 'ค่าน้ำมัน'];
+
+  if (foodKeywords.some(k => name.includes(k))) return 'ค่าอาหาร';
+  if (stayKeywords.some(k => name.includes(k))) return 'ค่าที่พัก';
+  if (transportKeywords.some(k => name.includes(k))) return 'ค่าเดินทาง';
+  return 'ค่าอื่นๆ';
+}
+
+function getCategoryEmoji(category) {
+  const map = { 'ค่าอาหาร': '🍽️', 'ค่าที่พัก': '🏨', 'ค่าเดินทาง': '🚗', 'ค่าอื่นๆ': '📦' };
+  return map[category] || '📦';
+}
+
+/**
  * Main Webhook Event Router
  */
 async function handleEvent(event) {
@@ -120,11 +141,13 @@ async function handleImageMessage(event) {
         hasPaid: false
       });
     }
+    const category = categorizeExpense(scanResult.merchantName);
     b.payers.push({
       userId: userId,
       displayName: profile.displayName,
       amountPaid: scanResult.totalAmount,
       itemName: scanResult.merchantName,
+      category: category,
       timestamp: Date.now()
     });
     return b;
@@ -133,11 +156,13 @@ async function handleImageMessage(event) {
   const names = updatedBill.participants.map((p, i) => `${i + 1}. ${p.displayName}`).join('\n');
   let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
   const splitAmount = Math.round((total / updatedBill.participants.length) * 100) / 100;
+  const lastCategory = updatedBill.payers[updatedBill.payers.length - 1].category;
 
   const replyMsg = `✨ น้องส้มอ่านสลิป/ใบเสร็จเรียบร้อยค่ะ 🧾
 
 👤 ผู้ชำระ: ${profile.displayName}
 🏪 รายการ: ${scanResult.merchantName} (${scanResult.totalAmount.toLocaleString('th-TH')} บาท)
+${getCategoryEmoji(lastCategory)} หมวดหมู่: ${lastCategory}
 
 💵 ยอดรวมสะสมมื้อนี้: ${total.toLocaleString('th-TH')} บาท
 
@@ -283,7 +308,8 @@ ${bankLabel}
 
     let itemListText = `📝 รายการค่าใช้จ่ายทั้งหมดในบิลนี้ (${activeBill.title}):\n\n`;
     activeBill.payers.forEach((item, index) => {
-      itemListText += `${index + 1}. ${item.itemName} - ${item.amountPaid.toLocaleString('th-TH')} บาท (จ่ายโดย: ${item.displayName})\n`;
+      const category = item.category || 'ค่าอื่นๆ';
+      itemListText += `${index + 1}. ${getCategoryEmoji(category)} [${category}] ${item.itemName} - ${item.amountPaid.toLocaleString('th-TH')} บาท (จ่ายโดย: ${item.displayName})\n`;
     });
 
     let total = activeBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
@@ -471,11 +497,13 @@ ${names}
           hasPaid: false
         });
       }
+      const category = categorizeExpense(payItemName);
       b.payers.push({
         userId: userId,
         displayName: profile.displayName,
         amountPaid: payAmount,
         itemName: payItemName,
+        category: category,
         timestamp: Date.now()
       });
       return b;
@@ -484,11 +512,13 @@ ${names}
     const names = updatedBill.participants.map((p, i) => `${i + 1}. ${p.displayName}`).join('\n');
     let total = updatedBill.payers.reduce((sum, p) => sum + p.amountPaid, 0);
     const splitAmount = Math.round((total / updatedBill.participants.length) * 100) / 100;
+    const lastCategory = updatedBill.payers[updatedBill.payers.length - 1].category;
 
     const replyMsg = `✨ บันทึกรายจ่ายเพิ่มเติมเรียบร้อยค่ะ! 📝
 
 👤 ผู้ชำระ: ${profile.displayName}
 ➕ เพิ่มรายการ: ${payItemName} (${payAmount.toLocaleString('th-TH')} บาท)
+${getCategoryEmoji(lastCategory)} หมวดหมู่: ${lastCategory}
 💵 ยอดรวมสะสมมื้อนี้: ${total.toLocaleString('th-TH')} บาท
 
 👥 สมาชิกที่เข้าร่วม (${updatedBill.participants.length} คน):
@@ -503,7 +533,31 @@ ${names}
   }
 
   // 9. SETTLE / CALCULATE BILL COMMAND (With Automatic PromptPay QR Images)
-  if (/^(สรุปยอด|คำนวณ|คิดเงิน|สรุปบิล)$/i.test(text)) {
+  const settleAskRegex = /^(สรุปยอด|คำนวณ|คิดเงิน|สรุปบิล)$/i;
+  const settleCategoryRegex = /^(?:สรุปยอด|คำนวณ|คิดเงิน|สรุปบิล)\s*(?:แยกหมวด|แยกประเภท|แยกตามหมวด)$/i;
+  const settleTotalRegex = /^(?:สรุปยอด|คำนวณ|คิดเงิน|สรุปบิล)\s*(?:รวม|รวมทั้งหมด|รวมทั้งทริป|รวมทริป)$/i;
+
+  if (settleAskRegex.test(text)) {
+    const activeBill = await db.getActiveBill(groupId);
+    if (!activeBill) {
+      return line.replyMessage(replyToken, {
+        type: 'text',
+        text: 'ยังไม่มีปาร์ตี้หรือบิลที่เปิดอยู่ขณะนี้ค่ะ 😊'
+      });
+    }
+
+    return line.replyMessage(replyToken, {
+      type: 'text',
+      text: `ก่อนสรุปยอด อยากให้น้องส้มแสดงผลแบบไหนดีคะ? 😊
+
+👉 พิมพ์ "สรุปยอด แยกหมวด" เพื่อดูแยกตามหมวดหมู่ (ค่าอาหาร/ที่พัก/เดินทาง/อื่นๆ)
+👉 พิมพ์ "สรุปยอด รวม" เพื่อดูยอดรวมทั้งทริปแบบเดิม`
+    });
+  }
+
+  if (settleCategoryRegex.test(text) || settleTotalRegex.test(text)) {
+    const showCategoryBreakdown = settleCategoryRegex.test(text);
+
     const activeBill = await db.getActiveBill(groupId);
     if (!activeBill) {
       return line.replyMessage(replyToken, {
@@ -529,9 +583,22 @@ ${names}
 ปาร์ตี้/มื้ออาหาร: ${updatedBill.title}
 ยอดรวมทั้งสิ้น: ${totalAmount.toLocaleString('th-TH')} บาท
 เฉลี่ยคนละ (${numParticipants} คน): ${Math.round(splitAmount * 100) / 100} บาท
-
-📊 สรุปยอดจ่ายสะสมของแต่ละคน:
 `;
+
+    if (showCategoryBreakdown) {
+      const categoryTotals = {};
+      (updatedBill.payers || []).forEach(p => {
+        const category = p.category || 'ค่าอื่นๆ';
+        categoryTotals[category] = (categoryTotals[category] || 0) + p.amountPaid;
+      });
+
+      replyMsgText += `\n🗂️ สรุปค่าใช้จ่ายแยกหมวดหมู่:\n`;
+      Object.entries(categoryTotals).forEach(([category, amount]) => {
+        replyMsgText += `${getCategoryEmoji(category)} ${category}: ${amount.toLocaleString('th-TH')} บาท\n`;
+      });
+    }
+
+    replyMsgText += `\n📊 สรุปยอดจ่ายสะสมของแต่ละคน:\n`;
 
     if (updatedBill.participantBalances) {
       updatedBill.participantBalances.forEach(p => {
@@ -729,14 +796,14 @@ function sendHelpMessage(replyToken) {
 2. เรียกดูบัญชีสมาชิกในกลุ่ม
 👉 พิมพ์: "ดูบัญชี" หรือ "ตรวจ บัญชี"
 
-3. ลงรายการค่าอาหาร/ค่าใช้จ่าย
+3. ลงรายการค่าอาหาร/ค่าใช้จ่าย (น้องส้มแยกหมวดหมู่ให้อัตโนมัติ: อาหาร/ที่พัก/เดินทาง/อื่นๆ)
 👉 พิมพ์: "ค่าขนม 200" หรือ "จ่าย 800 ค่าเค้ก"
 
 4. ดูและลบรายการที่พิมพ์ผิด
 👉 พิมพ์: "ดูรายการ" หรือ "ลบรายการ 2"
 
 5. คิดเงินสรุปยอด (สร้างรูป QR พร้อมระบุยอดโอนให้อัตโนมัติ)
-👉 พิมพ์: "สรุปยอด"`;
+👉 พิมพ์: "สรุปยอด" (น้องส้มจะถามว่าจะให้แยกหมวดหรือรวมทั้งทริป)`;
 
   return line.replyMessage(replyToken, {
     type: 'text',
