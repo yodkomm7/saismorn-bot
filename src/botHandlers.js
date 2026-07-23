@@ -380,25 +380,12 @@ async function handleTextMessage(event) {
         });
 
         const bankLabel = getBankLabel(user.bankName);
-        const qrUrl = getPromptPayQrUrl(user.accountNumber);
 
-        let replyMsgText = `✨ บันทึกข้อมูลบัญชีเรียบร้อยค่ะ!
+        const replyMsgText = `✨ บันทึกข้อมูลบัญชีเรียบร้อยค่ะ!
 
 ${bankLabel}
 🔢 เลข/เบอร์: ${user.accountNumber}
 👤 ชื่อบัญชี: ${user.accountName}`;
-
-        if (qrUrl) {
-          replyMsgText += `\n\n📸 น้องส้มสร้างรูป QR Code สำหรับสแกนจ่ายให้อัตโนมัติแล้วค่ะ! 👇`;
-          
-          return line.replyMessage(replyToken, [
-            { type: 'text', text: replyMsgText },
-            makeQrFlexMessage({
-              recipientName: user.accountName || user.displayName,
-              qrUrl
-            })
-          ]);
-        }
 
         return line.replyMessage(replyToken, { type: 'text', text: replyMsgText });
       }
@@ -407,6 +394,28 @@ ${bankLabel}
     return line.replyMessage(replyToken, {
       type: 'text',
       text: '📌 รบกวนระบุข้อมูลบัญชีให้ครบถ้วนนะคะ 😊\n\nรูปแบบ: บันทึกบัญชี [ธนาคาร/พร้อมเพย์] [เลขบัญชี/เบอร์โทร] [ชื่อเจ้าของ]\n\nตัวอย่าง:\nบันทึกบัญชี พร้อมเพย์ 0891234567 สมชาย'
+    });
+  }
+
+  // 2b. DELETE MY OWN BANK ACCOUNT (e.g. to switch to a new PromptPay number)
+  if (/^(ลบบัญชี|ลบเลขบัญชี|ลบข้อมูลบัญชี)$/i.test(text)) {
+    const existing = await db.getUser(userId);
+    if (!existing || !existing.bankName) {
+      return line.replyMessage(replyToken, {
+        type: 'text',
+        text: 'คุณยังไม่มีข้อมูลบัญชีบันทึกไว้ในระบบเลยค่ะ 😊'
+      });
+    }
+
+    await db.saveUser(userId, {
+      bankName: null,
+      accountNumber: null,
+      accountName: null
+    });
+
+    return line.replyMessage(replyToken, {
+      type: 'text',
+      text: '🗑️ ลบข้อมูลบัญชีของคุณเรียบร้อยแล้วค่ะ\n\n👉 พิมพ์ "บันทึกบัญชี [ธนาคาร/พร้อมเพย์] [เลขบัญชี] [ชื่อ]" เพื่อบันทึกใหม่ได้เลยนะคะ'
     });
   }
 
@@ -423,28 +432,14 @@ ${bankLabel}
     }
 
     let accountsListText = `📋 ข้อมูลเลขบัญชีของสมาชิกในกลุ่ม (น้องส้มบันทึกไว้ค่ะ):\n\n`;
-    const messages = [];
 
     registeredUsers.forEach((u, index) => {
       const bankLabel = getBankLabel(u.bankName);
       accountsListText += `${index + 1}. ${u.displayName}\n   ${bankLabel}\n   🔢 เลข/เบอร์: ${u.accountNumber}\n   👤 ชื่อ: ${u.accountName || u.displayName}\n\n`;
     });
-    accountsListText += `สามารถคัดลอกเลขบัญชี หรือสแกนรูป QR ด้านล่างเพื่อโอนได้เลยนะคะ 😊`;
+    accountsListText += `สามารถคัดลอกเลขบัญชีไปโอนได้เลยนะคะ 😊 (QR สำหรับสแกนจ่ายจะโชว์ตอนสรุปยอดหารค่าอาหารเท่านั้นค่ะ)`;
 
-    messages.push({ type: 'text', text: accountsListText });
-
-    // Send PromptPay QR images for registered users (Max 4 images to avoid LINE 5-message limit)
-    registeredUsers.slice(0, 4).forEach(u => {
-      const qrUrl = getPromptPayQrUrl(u.accountNumber);
-      if (qrUrl) {
-        messages.push(makeQrFlexMessage({
-          recipientName: u.accountName || u.displayName,
-          qrUrl
-        }));
-      }
-    });
-
-    return line.replyMessage(replyToken, messages);
+    return line.replyMessage(replyToken, { type: 'text', text: accountsListText });
   }
 
   // 4. VIEW LOGGED EXPENSE ITEMS IN ACTIVE BILL
@@ -913,11 +908,9 @@ ${names}
       });
     }
 
-    await db.updateBill(activeBill.id, (b) => {
-      b.status = 'closed';
-      b.closedAt = Date.now();
-      return b;
-    });
+    // Bill is deleted entirely (not just marked closed) so no leftover expense
+    // data lingers in the database — only account/bank info persists long-term.
+    await db.deleteBill(activeBill.id);
 
     return line.replyMessage(replyToken, {
       type: 'text',
@@ -934,11 +927,7 @@ ${names}
       });
     }
 
-    await db.updateBill(activeBill.id, (b) => {
-      b.status = 'closed';
-      b.cancelledAt = Date.now();
-      return b;
-    });
+    await db.deleteBill(activeBill.id);
 
     return line.replyMessage(replyToken, {
       type: 'text',
@@ -1042,6 +1031,7 @@ function sendHelpMessage(replyToken) {
 
 1. บันทึก PromptPay QR ของคุณ
 👉 พิมพ์: "บันทึก 0891234567 สมชาย"
+👉 ลบบัญชี (เช่น จะเปลี่ยนเลขพร้อมเพย์): พิมพ์ "ลบบัญชี" แล้วบันทึกใหม่ได้เลย
 
 2. เรียกดูบัญชีสมาชิกในกลุ่ม
 👉 พิมพ์: "ดูบัญชี" หรือ "ตรวจ บัญชี"

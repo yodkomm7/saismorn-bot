@@ -176,6 +176,13 @@ const database = {
     } finally {
       client.release();
     }
+  },
+
+  async deleteBill(billId) {
+    if (!billId) return null;
+    await ready;
+    await pool.query('DELETE FROM bills WHERE id = $1', [billId]);
+    return true;
   }
 };
 
