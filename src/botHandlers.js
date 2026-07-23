@@ -54,6 +54,70 @@ function getCategoryEmoji(category) {
 }
 
 /**
+ * Build a Flex Message bubble showing the QR code together with the
+ * recipient's name (and amount, if any) so the image is self-explanatory
+ * even if saved/forwarded on its own.
+ */
+function makeQrFlexMessage({ recipientName, amount = 0, qrUrl, payerName = null }) {
+  const bodyContents = [
+    {
+      type: 'text',
+      text: `👤 ผู้รับเงิน: ${recipientName}`,
+      weight: 'bold',
+      size: 'md',
+      color: '#1F2937',
+      wrap: true
+    }
+  ];
+
+  if (payerName) {
+    bodyContents.push({
+      type: 'text',
+      text: `🙋 โอนจาก: ${payerName}`,
+      size: 'sm',
+      color: '#6B7280',
+      wrap: true
+    });
+  }
+
+  if (amount > 0) {
+    bodyContents.push({
+      type: 'text',
+      text: `💵 จำนวนเงิน: ${amount.toLocaleString('th-TH')} บาท`,
+      weight: 'bold',
+      size: 'lg',
+      color: '#059669',
+      margin: 'sm'
+    });
+  }
+
+  return {
+    type: 'flex',
+    altText: amount > 0
+      ? `QR โอนเงินให้ ${recipientName} จำนวน ${amount.toLocaleString('th-TH')} บาท`
+      : `QR รับเงินของ ${recipientName}`,
+    contents: {
+      type: 'bubble',
+      size: 'kilo',
+      hero: {
+        type: 'image',
+        url: qrUrl,
+        size: 'full',
+        aspectRatio: '1:1',
+        aspectMode: 'fit',
+        backgroundColor: '#FFFFFF'
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        contents: bodyContents
+      }
+    }
+  };
+}
+
+/**
  * Main Webhook Event Router
  */
 async function handleEvent(event) {
@@ -240,11 +304,10 @@ ${bankLabel}
           
           return line.replyMessage(replyToken, [
             { type: 'text', text: replyMsgText },
-            {
-              type: 'image',
-              originalContentUrl: qrUrl,
-              previewImageUrl: qrUrl
-            }
+            makeQrFlexMessage({
+              recipientName: user.accountName || user.displayName,
+              qrUrl
+            })
           ]);
         }
 
@@ -285,11 +348,10 @@ ${bankLabel}
     registeredUsers.slice(0, 4).forEach(u => {
       const qrUrl = getPromptPayQrUrl(u.accountNumber);
       if (qrUrl) {
-        messages.push({
-          type: 'image',
-          originalContentUrl: qrUrl,
-          previewImageUrl: qrUrl
-        });
+        messages.push(makeQrFlexMessage({
+          recipientName: u.accountName || u.displayName,
+          qrUrl
+        }));
       }
     });
 
@@ -640,11 +702,12 @@ ${names}
         if (receiver && receiver.accountNumber) {
           const qrUrl = getPromptPayQrUrl(receiver.accountNumber, t.amount);
           if (qrUrl) {
-            messages.push({
-              type: 'image',
-              originalContentUrl: qrUrl,
-              previewImageUrl: qrUrl
-            });
+            messages.push(makeQrFlexMessage({
+              recipientName: receiver.accountName || receiver.displayName,
+              amount: t.amount,
+              payerName: t.fromName,
+              qrUrl
+            }));
           }
         }
       }
