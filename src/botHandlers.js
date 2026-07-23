@@ -38,7 +38,7 @@ function getPromptPayQrUrl(accountNumber = '', amount = 0) {
 function categorizeExpense(itemName = '') {
   const name = itemName.toLowerCase();
 
-  const foodKeywords = ['อาหาร', 'ข้าว', 'กับข้าว', 'ชาบู', 'หมูกระทะ', 'บุฟเฟ่ต์', 'บุฟเฟต์', 'เครื่องดื่ม', 'กาแฟ', 'ขนม', 'ของกิน', 'มื้อเช้า', 'มื้อเที่ยง', 'มื้อเย็น', 'อาหารเช้า', 'อาหารเที่ยง', 'อาหารเย็น', 'delivery', 'เดลิเวอรี่', 'ร้านอาหาร', 'ก๋วยเตี๋ยว', 'ปิ้งย่าง', 'สุกี้', 'ของหวาน', 'เบเกอรี่', 'ชานม', 'บิงซู', 'ร้านกาแฟ', 'คาเฟ่', 'บุฟเฟต'];
+  const foodKeywords = ['อาหาร', 'ข้าว', 'กับข้าว', 'ชาบู', 'หมูกระทะ', 'บุฟเฟ่ต์', 'บุฟเฟต์', 'เครื่องดื่ม', 'กาแฟ', 'ขนม', 'ของกิน', 'มื้อเช้า', 'มื้อเที่ยง', 'มื้อเย็น', 'อาหารเช้า', 'อาหารเที่ยง', 'อาหารเย็น', 'delivery', 'เดลิเวอรี่', 'ร้านอาหาร', 'ก๋วยเตี๋ยว', 'ปิ้งย่าง', 'สุกี้', 'ของหวาน', 'เบเกอรี่', 'ชานม', 'บิงซู', 'ร้านกาแฟ', 'คาเฟ่', 'บุฟเฟต', 'ส้มตำ', 'ลาบ', 'น้ำตก', 'ต้มยำ', 'แกง', 'ผัดไทย', 'ยำ', 'ก๋วยจั๊บ', 'ข้าวมันไก่', 'ข้าวหมูแดง', 'ข้าวขาหมู', 'เค้ก', 'ไอศกรีม', 'ผลไม้', 'น้ำอัดลม', 'นม', 'ชา', 'มาม่า', 'บะหมี่', 'หมูปิ้ง', 'ลูกชิ้น', 'ไก่ทอด', 'เบอร์เกอร์', 'พิซซ่า', 'สเต็ก', 'ซูชิ', 'ราเมง', 'ติ่มซำ', 'ยำวุ้นเส้น', 'ไก่ย่าง', 'หมูย่าง', 'อาหารทะเล', 'ซีฟู้ด'];
   const stayKeywords = ['โรงแรม', 'ที่พัก', 'รีสอร์ท', 'hotel', 'resort', 'โฮสเทล', 'hostel', 'ห้องพัก', 'บ้านพัก', 'คอนโด', 'homestay', 'โฮมสเตย์', 'แคมป์ปิ้ง'];
   const transportKeywords = ['รถ', 'แท็กซี่', 'taxi', 'grab', 'ตั๋ว', 'เครื่องบิน', 'น้ำมัน', 'ทางด่วน', 'รถเช่า', 'เรือ', 'รถทัวร์', 'รถไฟ', 'ค่าโดยสาร', 'วินมอเตอร์ไซค์', 'มอเตอร์ไซค์รับจ้าง', 'bts', 'mrt', 'ทางพิเศษ', 'ค่าเดินทาง', 'ค่าน้ำมัน'];
 
@@ -370,7 +370,7 @@ ${bankLabel}
 
     let itemListText = `📝 รายการค่าใช้จ่ายทั้งหมดในบิลนี้ (${activeBill.title}):\n\n`;
     activeBill.payers.forEach((item, index) => {
-      const category = item.category || 'ค่าอื่นๆ';
+      const category = item.category || categorizeExpense(item.itemName);
       itemListText += `${index + 1}. ${getCategoryEmoji(category)} [${category}] ${item.itemName} - ${item.amountPaid.toLocaleString('th-TH')} บาท (จ่ายโดย: ${item.displayName})\n`;
     });
 
@@ -650,7 +650,7 @@ ${names}
     if (showCategoryBreakdown) {
       const categoryTotals = {};
       (updatedBill.payers || []).forEach(p => {
-        const category = p.category || 'ค่าอื่นๆ';
+        const category = p.category || categorizeExpense(p.itemName);
         categoryTotals[category] = (categoryTotals[category] || 0) + p.amountPaid;
       });
 
