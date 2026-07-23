@@ -11,6 +11,33 @@ if (apiKey) {
   }
 }
 
+function isRetryableError(error) {
+  const status = error && error.status;
+  const message = (error && error.message) || '';
+  return status === 503 || status === 429 || /UNAVAILABLE|overloaded|RESOURCE_EXHAUSTED/i.test(message);
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function generateWithRetry(request, maxRetries = 2) {
+  let lastError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await ai.models.generateContent(request);
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxRetries && isRetryableError(error)) {
+        await sleep(1000 * (attempt + 1));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+}
+
 /**
  * Parses a receipt image buffer using Gemini Vision AI
  */
@@ -25,8 +52,8 @@ async function scanReceipt(imageBuffer, mimeType = 'image/jpeg') {
 
   try {
     const base64Data = imageBuffer.toString('base64');
-    
-    const response = await ai.models.generateContent({
+
+    const response = await generateWithRetry({
       model: 'gemini-2.5-flash',
       contents: [
         {
@@ -49,7 +76,7 @@ async function scanReceipt(imageBuffer, mimeType = 'image/jpeg') {
     });
 
     const textOutput = response.text || '';
-    
+
     // Clean JSON code blocks if present
     const cleanJson = textOutput.replace(/```json/gi, '').replace(/```/g, '').trim();
     const result = JSON.parse(cleanJson);
@@ -70,10 +97,19 @@ async function scanReceipt(imageBuffer, mimeType = 'image/jpeg') {
     };
   } catch (error) {
     console.error('Error scanning receipt with Gemini AI:', error);
+
+    if (isRetryableError(error)) {
+      return {
+        success: false,
+        reason: 'AI_OVERLOADED',
+        message: 'โอ๊ยยย! ตอนนี้ระบบ AI มีคนใช้งานเยอะมากค่ะ (Gemini เต็ม) รบกวนรอสักครู่แล้วลองส่งรูปใบเสร็จใหม่อีกครั้งนะคะ 🙏'
+      };
+    }
+
     return {
       success: false,
       reason: 'AI_ERROR',
-      message: 'โอ๊ยยย! เกิดข้อผิดพลาดตอนสายสมรแกะอ่านใบเสร็จสิยะ! ลองถ่ายรูปใบเสร็จให้ชัดๆ แล้วส่งมาอีกรอบนะ!'
+      message: 'โอ๊ยยย! เกิดข้อผิดพลาดตอนน้องส้มแกะอ่านใบเสร็จค่ะ! ลองถ่ายรูปใบเสร็จให้ชัดๆ แล้วส่งมาอีกรอบนะคะ!'
     };
   }
 }
