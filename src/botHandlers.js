@@ -65,6 +65,47 @@ function getCategoryEmoji(category) {
 
 const SUPPORTED_FOREIGN_CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'SGD', 'MYR', 'CNY', 'KRW', 'VND', 'LAK', 'KHR', 'AUD', 'HKD', 'TWD', 'IDR', 'PHP'];
 
+// Thai currency names, mapped to their code. Order doesn't matter here since
+// the pattern built from this is sorted longest-first (so "ดอลลาร์สิงคโปร์"
+// is tried before the shorter "ดอลลาร์" it contains).
+const THAI_CURRENCY_WORDS = {
+  'บาท': 'THB',
+  'หยวน': 'CNY',
+  'ดอลลาร์': 'USD', 'ดอลล่า': 'USD', 'ดอลล่าร์': 'USD', 'ดอล': 'USD',
+  'เยน': 'JPY',
+  'ยูโร': 'EUR',
+  'ปอนด์': 'GBP',
+  'วอน': 'KRW',
+  'ดง': 'VND',
+  'กีบ': 'LAK',
+  'เรียล': 'KHR',
+  'ริงกิต': 'MYR',
+  'รูเปียห์': 'IDR',
+  'เปโซ': 'PHP',
+  'ดอลลาร์สิงคโปร์': 'SGD', 'ดอลสิงคโปร์': 'SGD',
+  'ดอลลาร์ฮ่องกง': 'HKD', 'ดอลฮ่องกง': 'HKD',
+  'ดอลลาร์ไต้หวัน': 'TWD', 'ดอลไต้หวัน': 'TWD',
+  'ดอลลาร์ออสเตรเลีย': 'AUD', 'ดอลออสซี่': 'AUD', 'ดอลออส': 'AUD'
+};
+
+const THAI_CURRENCY_PATTERN = new RegExp(
+  `(\\d+(?:\\.\\d+)?)\\s*(${Object.keys(THAI_CURRENCY_WORDS).sort((a, b) => b.length - a.length).join('|')})(?=\\s|$)`,
+  'g'
+);
+
+/**
+ * Rewrites amounts glued to a Thai currency name (e.g. "30หยวน", "40ดอลล่า")
+ * into "30 CNY", "40 USD", etc. so the rest of the currency-parsing pipeline
+ * (which expects a space-separated code) picks them up unchanged. THB is
+ * dropped entirely since it's already the implicit default.
+ */
+function normalizeThaiCurrencyGlue(text) {
+  return text.replace(THAI_CURRENCY_PATTERN, (match, amount, word) => {
+    const code = THAI_CURRENCY_WORDS[word];
+    return code === 'THB' ? amount : `${amount} ${code}`;
+  });
+}
+
 /**
  * Detect a currency code as the first token of free text (e.g. "JPY ค่าอาหาร"),
  * returning the remaining text as the item name.
@@ -347,6 +388,7 @@ ${names}
  */
 async function handleTextMessage(event) {
   let text = event.message.text.trim();
+  text = normalizeThaiCurrencyGlue(text);
 
   const mentionPrefix = text.match(/^@\S+\s*/);
   text = text.replace(/^@\S+\s*/, '').trim();
@@ -1084,7 +1126,7 @@ function sendHelpMessage(replyToken) {
 2. ลงรายการค่าอาหาร/ค่าใช้จ่าย (น้องส้มแยกหมวดหมู่ให้อัตโนมัติ: อาหาร/ที่พัก/เดินทาง/อื่นๆ)
 👉 พิมพ์: "จ่าย 800 ค่าเค้ก" หรือส่งรูปสลิป/ใบเสร็จให้น้องส้มอ่านให้เลย 📸
 👉 ถ้ามีปาร์ตี้เปิดอยู่แล้ว พิมพ์สั้นๆ แบบ "ค่าขนม 200" ก็ได้ค่ะ
-👉 ใช้สกุลเงินต่างประเทศได้: "จ่าย 500 JPY ค่าอาหาร"
+👉 ใช้สกุลเงินต่างประเทศได้: "จ่าย 500 JPY ค่าอาหาร" หรือพิมพ์ชื่อสกุลเงินเป็นภาษาไทยติดกับตัวเลขก็ได้ เช่น "30หยวน", "40ดอลล่า"
 
 3. ดูและลบรายการที่พิมพ์ผิด
 👉 พิมพ์: "ดูรายการ" หรือ "ลบรายการ 2"
