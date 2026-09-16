@@ -347,12 +347,18 @@ ${names}
  */
 async function handleTextMessage(event) {
   let text = event.message.text.trim();
-  
+
+  const mentionPrefix = text.match(/^@\S+\s*/);
   text = text.replace(/^@\S+\s*/, '').trim();
 
   const userId = event.source.userId;
   const groupId = event.source.groupId || event.source.roomId || event.source.userId;
   const replyToken = event.replyToken;
+
+  // 0. BARE MENTION (e.g. someone just tags "@น้องส้ม" with no command after it)
+  if (mentionPrefix && text === '') {
+    return sendQuickStartMessage(replyToken);
+  }
 
   // 1. HELP COMMAND
   if (/^(ช่วยด้วย|วิธีใช้|help)$/i.test(text)) {
@@ -1041,6 +1047,26 @@ async function calculateSettlement(billId) {
     }
 
     return b;
+  });
+}
+
+/**
+ * Short quick-start reply when someone bare-mentions the bot (e.g. "@น้องส้ม")
+ * with no command after it. Full command list is still "วิธีใช้"/"help".
+ */
+function sendQuickStartMessage(replyToken) {
+  const quickStartText = `หวัดดีค่ะ น้องส้มพร้อมช่วยหารเงินแล้ว! 🍊✨
+
+เริ่มยังไงดี:
+👉 "เริ่มเฉลี่ย [ชื่อทริป]" — เปิดปาร์ตี้ใหม่
+👉 "จ่าย [ยอด] [รายการ]" — บันทึกค่าใช้จ่าย (หรือส่งรูปสลิปก็อ่านให้เลย 📸)
+👉 "สรุปยอด" — คิดเงินคืนเมื่อพร้อมแล้ว
+
+พิมพ์ "วิธีใช้" เพื่อดูคำสั่งทั้งหมดนะคะ 😊`;
+
+  return line.replyMessage(replyToken, {
+    type: 'text',
+    text: quickStartText
   });
 }
 
