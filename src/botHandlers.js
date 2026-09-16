@@ -705,9 +705,13 @@ ${names}
     payItemName = parsed.itemName || 'รายการเพิ่มเติม';
   } else if (addSuffixRegex.test(text)) {
     const match = text.match(addSuffixRegex);
-    // Only auto-detect an amount here when there's no explicit "จ่าย"/"บวก" command,
-    // so skip trailing digits that are actually Thai laughter (e.g. "ตลกมาก 5555").
-    if (!looksLikeThaiLaughter(match[2])) {
+    // This freeform "[item] [number]" shorthand has no explicit command keyword
+    // (unlike "จ่าย"/"บวก"), so it's only trusted once the group already has an
+    // active bill session running — otherwise ordinary chat that happens to end
+    // in a number (or Thai laughter like "ตลกมาก 5555") would silently get
+    // logged as an expense, or even create a brand-new bill out of nowhere.
+    const hasActiveBillAlready = !!(await db.getActiveBill(groupId));
+    if (hasActiveBillAlready && !looksLikeThaiLaughter(match[2])) {
       payItemName = match[1].trim();
       payAmount = parseFloat(match[2]);
       payCurrency = match[3] ? match[3].toUpperCase() : 'THB';
