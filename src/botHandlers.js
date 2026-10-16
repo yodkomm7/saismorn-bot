@@ -346,11 +346,12 @@ async function handleImageMessage(event) {
         hasPaid: false
       });
     }
-    const category = categorizeExpense(scanResult.merchantName);
+    const category = scanResult.category || categorizeExpense(scanResult.merchantName);
     b.payers.push({
       userId: userId,
       displayName: profile.displayName,
       amountPaid: scanResult.totalAmount,
+      currency: scanResult.currency || 'THB',
       itemName: scanResult.merchantName,
       category: category,
       timestamp: Date.now()
@@ -366,7 +367,7 @@ async function handleImageMessage(event) {
   const replyMsg = `✨ น้องส้มอ่านสลิป/ใบเสร็จเรียบร้อยค่ะ 🧾
 
 👤 ผู้ชำระ: ${profile.displayName}
-🏪 รายการ: ${scanResult.merchantName} (${scanResult.totalAmount.toLocaleString('th-TH')} บาท)
+🏪 รายการ: ${scanResult.merchantName} (${scanResult.totalAmount.toLocaleString('th-TH')} ${(scanResult.currency || 'THB') === 'THB' ? 'บาท' : scanResult.currency})
 ${getCategoryEmoji(lastCategory)} หมวดหมู่: ${lastCategory}
 
 💵 ยอดรวมสะสมมื้อนี้ (บาท): ${thbTotal.toLocaleString('th-TH')} บาท${formatForeignNote(foreignTotals)}

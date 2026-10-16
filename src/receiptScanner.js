@@ -62,12 +62,14 @@ async function scanReceipt(imageBuffer, mimeType = 'image/jpeg') {
             data: base64Data
           }
         },
-        `คุณคือระบบ OCR อ่านสลิปและใบเสร็จภาษาไทยที่แม่นยำสูง กรุณาวิเคราะห์รูปภาพนี้และสกัดข้อมูลสำคัญตอบกลับมาเป็น JSON สั้นๆ เท่านั้น (ห้ามมีคำเกริ่น ห้ามมี markdown codeblock อื่น):
+        `คุณคือระบบ OCR อ่านสลิปและใบเสร็จที่แม่นยำสูง ใบเสร็จอาจเป็นภาษาใดก็ได้ (ไทย อังกฤษ จีน ญี่ปุ่น เกาหลี ฯลฯ) กรุณาวิเคราะห์รูปภาพนี้และสกัดข้อมูลสำคัญตอบกลับมาเป็น JSON สั้นๆ เท่านั้น (ห้ามมีคำเกริ่น ห้ามมี markdown codeblock อื่น):
 
 {
   "isReceipt": true หรือ false (ถ้าเป็นใบเสร็จ สลิปโอนเงิน บิลชำระเงิน ให้เป็น true),
-  "merchantName": "ชื่อร้านค้า หรือชื่อประเภทมื้ออาหาร",
+  "merchantName": "ชื่อร้านค้า เขียนเป็นภาษาไทย (ทับศัพท์ได้ เช่น แฟมิลี่มาร์ท)",
   "totalAmount": ยอดเงินรวมสุทธิ (ตัวเลขอย่างเดียว เช่น 1250),
+  "currency": "รหัสสกุลเงิน ISO 4217 ของยอดเงินในใบเสร็จ เช่น THB, JPY, CNY, USD, KRW (ดูจากสัญลักษณ์ ¥ $ ₩ € หรือ ประเทศ/ภาษาของใบเสร็จ; ¥ ในใบเสร็จญี่ปุ่นคือ JPY ในใบเสร็จจีนคือ CNY)",
+  "category": "หนึ่งในนี้เท่านั้น: ค่าอาหาร, ค่าที่พัก, ค่าเดินทาง, ค่าอื่นๆ",
   "items": [
     { "name": "ชื่อรายการอาหาร", "price": ยอดเงินตัวเลข }
   ]
@@ -89,10 +91,17 @@ async function scanReceipt(imageBuffer, mimeType = 'image/jpeg') {
       };
     }
 
+    const currency = /^[A-Z]{3}$/.test(String(result.currency || '').toUpperCase())
+      ? String(result.currency).toUpperCase()
+      : 'THB';
+    const validCategories = ['ค่าอาหาร', 'ค่าที่พัก', 'ค่าเดินทาง', 'ค่าอื่นๆ'];
+
     return {
       success: true,
       merchantName: result.merchantName || 'ค่าอาหารตามใบเสร็จ',
       totalAmount: parseFloat(result.totalAmount),
+      currency,
+      category: validCategories.includes(result.category) ? result.category : null,
       items: result.items || []
     };
   } catch (error) {
