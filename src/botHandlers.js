@@ -363,13 +363,30 @@ async function handleImageMessage(event) {
   const { thbTotal, foreignTotals } = summarizePayers(updatedBill.payers);
   const splitAmount = Math.round((thbTotal / updatedBill.participants.length) * 100) / 100;
   const lastCategory = updatedBill.payers[updatedBill.payers.length - 1].category;
+  const currencyLabel = (scanResult.currency || 'THB') === 'THB' ? 'บาท' : scanResult.currency;
+
+  const MAX_ITEMS_SHOWN = 10;
+  const scannedItems = (scanResult.items || []).filter(it => it && it.name);
+  let itemsText = '';
+  if (scannedItems.length > 0) {
+    itemsText = '\n🧾 รายการในใบเสร็จ:\n' + scannedItems.slice(0, MAX_ITEMS_SHOWN).map(it => {
+      const original = it.originalName && it.originalName !== it.name ? ` (${it.originalName})` : '';
+      const price = Number(it.price);
+      const priceText = Number.isFinite(price) ? ` ${price.toLocaleString('th-TH')} ${currencyLabel}` : '';
+      return `• ${it.name}${original}${priceText}`;
+    }).join('\n');
+    if (scannedItems.length > MAX_ITEMS_SHOWN) {
+      itemsText += `\n…และอีก ${scannedItems.length - MAX_ITEMS_SHOWN} รายการ`;
+    }
+    itemsText += '\n';
+  }
 
   const replyMsg = `✨ น้องส้มอ่านสลิป/ใบเสร็จเรียบร้อยค่ะ 🧾
 
 👤 ผู้ชำระ: ${profile.displayName}
-🏪 รายการ: ${scanResult.merchantName} (${scanResult.totalAmount.toLocaleString('th-TH')} ${(scanResult.currency || 'THB') === 'THB' ? 'บาท' : scanResult.currency})
+🏪 ร้าน: ${scanResult.merchantName} (${scanResult.totalAmount.toLocaleString('th-TH')} ${currencyLabel})
 ${getCategoryEmoji(lastCategory)} หมวดหมู่: ${lastCategory}
-
+${itemsText}
 💵 ยอดรวมสะสมมื้อนี้ (บาท): ${thbTotal.toLocaleString('th-TH')} บาท${formatForeignNote(foreignTotals)}
 
 👥 สมาชิกที่เข้าร่วม (${updatedBill.participants.length} คน):
