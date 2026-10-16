@@ -383,6 +383,9 @@ async function handleImageMessage(event) {
       itemsText += `\n…และอีก ${scannedItems.length - MAX_ITEMS_SHOWN} รายการ`;
     }
     itemsText += '\n';
+  } else {
+    // Payment slips (bank transfer / QR payment) carry no line items, only the payee.
+    itemsText = `\n📝 สลิปนี้ไม่มีรายการสินค้า ถ้าอยากระบุว่าซื้ออะไร พิมพ์ "แก้ชื่อรายการ ${updatedBill.payers.length} [ชื่อสิ่งที่ซื้อ]" ได้เลยค่ะ\n`;
   }
 
   const replyMsg = `✨ น้องส้มอ่านสลิป/ใบเสร็จเรียบร้อยค่ะ 🧾
@@ -597,6 +600,48 @@ ${bankLabel}
 👉 พิมพ์ "สรุปยอด" เมื่อลงครบเรียบร้อยนะคะ 😊`;
 
     return line.replyMessage(replyToken, { type: 'text', text: replyMsg });
+  }
+
+  // 5b. RENAME AN EXPENSE ITEM (e.g. a payment slip that only showed the payee's company name)
+  const renameItemRegex = /^(?:แก้\s*ชื่อ\s*รายการ|แก้ไข\s*รายการ|เปลี่ยน\s*ชื่อ\s*รายการ)\s+(\d+)\s+(.+)$/i;
+  if (renameItemRegex.test(text)) {
+    const [, indexStr, rawName] = text.match(renameItemRegex);
+    const itemIndex = parseInt(indexStr) - 1;
+    const newName = rawName.trim();
+
+    const activeBill = await db.getActiveBill(groupId);
+    if (!activeBill || !activeBill.payers || activeBill.payers.length === 0) {
+      return line.replyMessage(replyToken, {
+        type: 'text',
+        text: 'ยังไม่มีรายการให้แก้ไขค่ะ 😊'
+      });
+    }
+
+    if (itemIndex < 0 || itemIndex >= activeBill.payers.length) {
+      return line.replyMessage(replyToken, {
+        type: 'text',
+        text: `ไม่พบลำดับรายการที่ ${itemIndex + 1} ค่ะ 😊\nพิมพ์ "ดูรายการ" เพื่อเช็คลำดับรายการทั้งหมดก่อนนะคะ!`
+      });
+    }
+
+    let oldName = '';
+    const updatedBill = await db.updateBill(activeBill.id, (b) => {
+      const item = b.payers[itemIndex];
+      oldName = item.itemName;
+      item.itemName = newName;
+      // Keep the previous category (e.g. one Gemini inferred) if the new name has no keyword match.
+      const recategorized = categorizeExpense(newName);
+      if (recategorized !== 'ค่าอื่นๆ' || !item.category) {
+        item.category = recategorized;
+      }
+      return b;
+    });
+
+    const item = updatedBill.payers[itemIndex];
+    return line.replyMessage(replyToken, {
+      type: 'text',
+      text: `✏️ แก้ชื่อรายการที่ ${itemIndex + 1} เรียบร้อยค่ะ!\n\n"${oldName}" → "${item.itemName}"\n${getCategoryEmoji(item.category)} หมวดหมู่: ${item.category}`
+    });
   }
 
   // 6. JOIN BILL COMMAND
@@ -1150,8 +1195,8 @@ function sendHelpMessage(replyToken) {
 👉 ถ้ามีปาร์ตี้เปิดอยู่แล้ว พิมพ์สั้นๆ แบบ "ค่าขนม 200" ก็ได้ค่ะ
 👉 ใช้สกุลเงินต่างประเทศได้: "จ่าย 500 JPY ค่าอาหาร" หรือพิมพ์ชื่อสกุลเงินเป็นภาษาไทยติดกับตัวเลขก็ได้ เช่น "30หยวน", "40ดอลล่า"
 
-3. ดูและลบรายการที่พิมพ์ผิด
-👉 พิมพ์: "ดูรายการ" หรือ "ลบรายการ 2"
+3. ดู แก้ไข และลบรายการ
+👉 พิมพ์: "ดูรายการ", "ลบรายการ 2" หรือ "แก้ชื่อรายการ 2 ชานมไข่มุก" (เช่น สลิปที่ไม่มีชื่อสินค้า)
 
 4. คิดเงินสรุปยอด (ส่งรูป QR พร้อมระบุยอดโอนให้อัตโนมัติ)
 👉 พิมพ์: "สรุปยอด" — ถ้ามีสกุลเงินอื่นจะถามเรทก่อน ("เรท JPY 0.24" หรือพิมพ์ "ไม่แปลงสกุลเงิน" เพื่อข้าม) จากนั้นเลือก "สรุปยอด แยกหมวด" หรือ "สรุปยอด รวม"
