@@ -49,13 +49,17 @@ function categorizeExpense(itemName = '') {
 }
 
 /**
- * Detect Thai internet laughter written as digits (e.g. "555", "5555"),
- * since "5" is pronounced "ha" in Thai. Used to stop the freeform
- * "[item] [number]" expense-logging pattern from misreading a laugh as
- * an amount (e.g. "ตลกมาก 5555" being parsed as a 5,555 baht expense).
+ * Detect Thai internet laughter written as digits ("55", "555", "5555" —
+ * "5" is pronounced "ha"), so the freeform "[item] [number]" pattern doesn't
+ * log "ถ้าแปลไม่ได้ ก็พิมพ์เอา 55" as a 55 baht expense. All-5 amounts are
+ * still accepted when the text in front reads like an expense name
+ * ("ค่าขนม 55", "ส้มตำ 55"), since those are plausible real prices.
  */
-function looksLikeThaiLaughter(numStr = '') {
-  return /^5{3,}$/.test(numStr.trim());
+function looksLikeThaiLaughter(numStr = '', itemText = '') {
+  if (!/^5{2,}$/.test(numStr.trim())) return false;
+  const name = itemText.trim();
+  const looksLikeExpenseName = name.startsWith('ค่า') || categorizeExpense(name) !== 'ค่าอื่นๆ';
+  return !looksLikeExpenseName;
 }
 
 function getCategoryEmoji(category) {
@@ -777,7 +781,7 @@ ${names}
     // in a number (or Thai laughter like "ตลกมาก 5555") would silently get
     // logged as an expense, or even create a brand-new bill out of nowhere.
     const hasActiveBillAlready = !!(await db.getActiveBill(groupId));
-    if (hasActiveBillAlready && !looksLikeThaiLaughter(match[2])) {
+    if (hasActiveBillAlready && !looksLikeThaiLaughter(match[2], match[1])) {
       payItemName = match[1].trim();
       payAmount = parseFloat(match[2]);
       payCurrency = match[3] ? match[3].toUpperCase() : 'THB';
